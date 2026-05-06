@@ -18,8 +18,12 @@ type ReviewComment = {
   id: string;
   filePath: string;
   text: string;
-  oldLineNumber?: number;
-  newLineNumber?: number;
+  startLineId: string;
+  endLineId: string;
+  startOldLineNumber?: number;
+  startNewLineNumber?: number;
+  endOldLineNumber?: number;
+  endNewLineNumber?: number;
   lineText: string;
 };
 
@@ -37,6 +41,11 @@ type ReviewLine = {
 type ReviewResult =
   | { action: "submit"; comments: ReviewComment[] }
   | { action: "cancel" };
+
+type SelectionBounds = {
+  start: number;
+  end: number;
+};
 
 function getUnstagedDiff(cwd: string): string {
   return execFileSync("git", ["diff", "--no-color", "--unified=3"], {
@@ -189,8 +198,9 @@ function formatLocation(line: {
 }): string {
   const file = line.filePath ?? "(unknown file)";
   if (line.oldLineNumber != null && line.newLineNumber != null) {
-    if (line.oldLineNumber === line.newLineNumber)
+    if (line.oldLineNumber === line.newLineNumber) {
       return `${file}:${line.newLineNumber}`;
+    }
     return `${file}:old:${line.oldLineNumber}/new:${line.newLineNumber}`;
   }
   if (line.newLineNumber != null) return `${file}:new:${line.newLineNumber}`;
@@ -198,12 +208,26 @@ function formatLocation(line: {
   return file;
 }
 
+function formatCommentLocation(comment: ReviewComment): string {
+  const start = formatLocation({
+    filePath: comment.filePath,
+    oldLineNumber: comment.startOldLineNumber,
+    newLineNumber: comment.startNewLineNumber,
+  });
+  const end = formatLocation({
+    filePath: comment.filePath,
+    oldLineNumber: comment.endOldLineNumber,
+    newLineNumber: comment.endNewLineNumber,
+  });
+  return start === end ? start : `${start} -> ${end}`;
+}
+
 function buildReviewPrompt(comments: ReviewComment[]): string {
   const body = comments
     .map((comment) => {
-      const location = formatLocation(comment);
+      const location = formatCommentLocation(comment);
       const excerpt = comment.lineText.trim()
-        ? `\n  Excerpt: \`${comment.lineText.trim()}\``
+        ? `\n  Excerpt:\n\n\`\`\`diff\n${comment.lineText}\n\`\`\``
         : "";
       return `- \`${location}\` — ${comment.text}${excerpt}`;
     })
@@ -226,7 +250,8 @@ class ReviewComponent {
   private selected = 0;
   private scrollTop = 0;
   private editMode = false;
-  private editingLineId?: string;
+  private editingCommentKey?: string;
+  private selectionAnchor?: number;
   private editor: Editor;
 
   constructor(
@@ -254,24 +279,18 @@ class ReviewComponent {
     });
 
     this.editor.onSubmit = (value) => {
-      const line = this.lines[this.selected];
-      if (!line?.commentable) {
+      const selection = this.getActiveCommentSelection();
+      if (!selection) {
         this.exitEditMode();
         return;
       }
 
       const trimmed = value.trim();
+      const key = this.getSelectionKey(selection.start, selection.end);
       if (!trimmed) {
-        this.comments.delete(line.id);
+        this.comments.delete(key);
       } else {
-        this.comments.set(line.id, {
-          id: line.id,
-          filePath: line.filePath ?? "(unknown file)",
-          text: trimmed,
-          oldLineNumber: line.oldLineNumber,
-          newLineNumber: line.newLineNumber,
-          lineText: line.text,
-        });
+        this.comments.set(key, this.buildCommentFromSelection(selection, trimmed));
       }
 
       this.exitEditMode();
@@ -280,7 +299,7 @@ class ReviewComponent {
 
   handleInput(data: string): void {
     if (this.editMode) {
-      if (matchesKey(data, "escape")) {
+      if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
         this.exitEditMode();
         return;
       }
@@ -289,7 +308,15 @@ class ReviewComponent {
       return;
     }
 
-    if (matchesKey(data, "escape") || data === "q") {
+    if (matchesKey(data, "escape")) {
+      if (this.hasSelection()) {
+        this.clearSelection();
+      } else {
+        this.done({ action: "cancel" });
+      }
+      return;
+    }
+    if (data === "q") {
       this.done({ action: "cancel" });
       return;
     }
@@ -299,6 +326,14 @@ class ReviewComponent {
     }
     if (data === "k" || matchesKey(data, "up")) {
       this.move(-1);
+      return;
+    }
+    if (data === "J") {
+      this.extendSelection(1);
+      return;
+    }
+    if (data === "K") {
+      this.extendSelection(-1);
       return;
     }
     if (data === "n") {
@@ -318,10 +353,9 @@ class ReviewComponent {
       return;
     }
     if (data === "R") {
-      const comments = this.lines
-        .filter((line) => this.comments.has(line.id))
-        .map((line) => this.comments.get(line.id)!)
-        .filter(Boolean);
+      const comments = [...this.comments.values()].sort((a, b) =>
+        a.id.localeCompare(b.id),
+      );
       if (comments.length === 0) return;
       this.done({ action: "submit", comments });
     }
@@ -364,20 +398,26 @@ class ReviewComponent {
           "dim",
           this.editMode
             ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
-            : `${this.lines.length} lines • ${this.comments.size} comments • j/k move • c comment • x delete • n/p hunk • R submit • q quit`,
+            : this.hasSelection()
+              ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • R submit`
+              : `${this.lines.length} lines • ${this.comments.size} comments • j/k move • J/K extend • c comment • x delete • n/p hunk • R submit • q quit`,
         ),
         width,
       ),
     );
     output.push(this.theme.fg("border", "─".repeat(width)));
 
+    const selection = this.getSelectionBounds();
     for (let row = 0; row < viewportHeight; row++) {
-      const line = this.lines[this.scrollTop + row];
+      const index = this.scrollTop + row;
+      const line = this.lines[index];
       const left = line
         ? this.renderDiffLine(
             line,
+            index,
             leftWidth,
-            this.scrollTop + row === this.selected,
+            index === this.selected,
+            selection,
           )
         : " ".repeat(leftWidth);
       const right = rightPane[row] ?? " ".repeat(rightWidth);
@@ -386,12 +426,9 @@ class ReviewComponent {
     }
 
     output.push(this.theme.fg("border", "─".repeat(width)));
-    const selectedLocation = selectedLine
-      ? formatLocation(selectedLine)
-      : "(no selection)";
     output.push(
       truncateToWidth(
-        this.theme.fg("muted", `Selected: ${selectedLocation}`),
+        this.theme.fg("muted", this.getFooterText(selectedLine)),
         width,
       ),
     );
@@ -408,6 +445,100 @@ class ReviewComponent {
     this.tui.requestRender();
   }
 
+  private extendSelection(delta: number): void {
+    if (this.selectionAnchor == null) {
+      this.selectionAnchor = this.selected;
+    }
+    this.selected = Math.max(
+      0,
+      Math.min(this.lines.length - 1, this.selected + delta),
+    );
+    this.tui.requestRender();
+  }
+
+  private clearSelection(): void {
+    this.selectionAnchor = undefined;
+    this.tui.requestRender();
+  }
+
+  private hasSelection(): boolean {
+    return this.selectionAnchor != null && this.selectionAnchor !== this.selected;
+  }
+
+  private getSelectionBounds(): SelectionBounds | undefined {
+    if (this.selectionAnchor == null) return undefined;
+    return {
+      start: Math.min(this.selectionAnchor, this.selected),
+      end: Math.max(this.selectionAnchor, this.selected),
+    };
+  }
+
+  private getActiveCommentSelection(): SelectionBounds | undefined {
+    const selection = this.getSelectionBounds();
+    if (selection) return selection;
+    const line = this.lines[this.selected];
+    if (!line?.commentable) return undefined;
+    return { start: this.selected, end: this.selected };
+  }
+
+  private getSelectionKey(start: number, end: number): string {
+    return `${this.lines[start]?.id ?? start}:${this.lines[end]?.id ?? end}`;
+  }
+
+  private getCommentForSelection(
+    selection: SelectionBounds | undefined,
+  ): ReviewComment | undefined {
+    if (!selection) return undefined;
+    return this.comments.get(this.getSelectionKey(selection.start, selection.end));
+  }
+
+  private getCommentKeysForLine(index: number): string[] {
+    const line = this.lines[index];
+    if (!line) return [];
+    return [...this.comments.entries()]
+      .filter(([, comment]) => {
+        const start = this.lines.findIndex((item) => item.id === comment.startLineId);
+        const end = this.lines.findIndex((item) => item.id === comment.endLineId);
+        return start !== -1 && end !== -1 && index >= start && index <= end;
+      })
+      .map(([key]) => key);
+  }
+
+  private buildCommentFromSelection(
+    selection: SelectionBounds,
+    text: string,
+  ): ReviewComment {
+    const startLine = this.lines[selection.start]!;
+    const endLine = this.lines[selection.end]!;
+    const excerpt = this.lines
+      .slice(selection.start, selection.end + 1)
+      .map((line) => line.text)
+      .join("\n");
+    return {
+      id: this.getSelectionKey(selection.start, selection.end),
+      filePath: startLine.filePath ?? endLine.filePath ?? "(unknown file)",
+      text,
+      startLineId: startLine.id,
+      endLineId: endLine.id,
+      startOldLineNumber: startLine.oldLineNumber,
+      startNewLineNumber: startLine.newLineNumber,
+      endOldLineNumber: endLine.oldLineNumber,
+      endNewLineNumber: endLine.newLineNumber,
+      lineText: excerpt,
+    };
+  }
+
+  private getFooterText(selectedLine?: ReviewLine): string {
+    const selection = this.getSelectionBounds();
+    if (selection) {
+      const count = selection.end - selection.start + 1;
+      const startLine = this.lines[selection.start]!;
+      const endLine = this.lines[selection.end]!;
+      return `Selected ${count} lines: ${formatLocation(startLine)} -> ${formatLocation(endLine)}`;
+    }
+    return `Selected: ${selectedLine ? formatLocation(selectedLine) : "(no selection)"}`;
+  }
+
   private jumpHunk(direction: 1 | -1): void {
     let index = this.selected + direction;
     while (index >= 0 && index < this.lines.length) {
@@ -421,25 +552,30 @@ class ReviewComponent {
   }
 
   private deleteComment(): void {
-    const line = this.lines[this.selected];
-    if (!line?.commentable) return;
-    this.comments.delete(line.id);
+    const selection = this.getActiveCommentSelection();
+    if (!selection) return;
+    this.comments.delete(this.getSelectionKey(selection.start, selection.end));
     this.tui.requestRender();
   }
 
   private startEditMode(): void {
-    const line = this.lines[this.selected];
-    if (!line?.commentable) return;
-    const existing = this.comments.get(line.id);
+    const selection = this.getActiveCommentSelection();
+    if (!selection) return;
+    const startLine = this.lines[selection.start];
+    const endLine = this.lines[selection.end];
+    if (!startLine?.commentable || !endLine?.commentable) return;
+    if (startLine.filePath !== endLine.filePath) return;
+
+    const existing = this.getCommentForSelection(selection);
     this.editMode = true;
-    this.editingLineId = line.id;
+    this.editingCommentKey = this.getSelectionKey(selection.start, selection.end);
     this.editor.setText(existing?.text ?? "");
     this.tui.requestRender(true);
   }
 
   private exitEditMode(): void {
     this.editMode = false;
-    this.editingLineId = undefined;
+    this.editingCommentKey = undefined;
     this.editor.setText("");
     this.tui.requestRender(true);
   }
@@ -459,12 +595,13 @@ class ReviewComponent {
 
   private renderDiffLine(
     line: ReviewLine,
+    index: number,
     width: number,
     selected: boolean,
+    selection?: SelectionBounds,
   ): string {
-    const commentMark = this.comments.has(line.id)
-      ? this.theme.fg("warning", "●")
-      : " ";
+    const hasComment = this.getCommentKeysForLine(index).length > 0;
+    const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
     const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
     const raw = `${commentMark} ${numbers} ${line.text}`;
 
@@ -487,9 +624,12 @@ class ReviewComponent {
     }
 
     styled = truncateToWidth(styled, width);
-    return selected
-      ? this.theme.bg("selectedBg", padToWidth(styled, width))
-      : styled;
+    const inSelection =
+      selection != null && index >= selection.start && index <= selection.end;
+    if (selected || inSelection) {
+      return this.theme.bg("selectedBg", padToWidth(styled, width));
+    }
+    return styled;
   }
 
   private renderRightPane(
@@ -499,12 +639,19 @@ class ReviewComponent {
   ): string[] {
     const lines: string[] = [];
     const title = this.theme.fg("accent", this.theme.bold("Comments"));
+    const selection = this.getActiveCommentSelection();
+    const currentComment = this.getCommentForSelection(selection);
+
     lines.push(truncateToWidth(title, width));
     lines.push(
       truncateToWidth(
         this.theme.fg(
           "dim",
-          selectedLine ? formatLocation(selectedLine) : "No selection",
+          selection
+            ? this.getFooterText(selectedLine)
+            : selectedLine
+              ? formatLocation(selectedLine)
+              : "No selection",
         ),
         width,
       ),
@@ -521,7 +668,7 @@ class ReviewComponent {
       return lines.slice(0, height);
     }
 
-    if (!selectedLine.commentable) {
+    if (!selection) {
       lines.push(
         ...wrapTextWithAnsi(
           this.theme.fg(
@@ -534,7 +681,7 @@ class ReviewComponent {
       return lines.slice(0, height);
     }
 
-    if (this.editMode && this.editingLineId === selectedLine.id) {
+    if (this.editMode && currentComment?.id === this.editingCommentKey) {
       lines.push(
         ...wrapTextWithAnsi(
           this.theme.fg(
@@ -548,37 +695,55 @@ class ReviewComponent {
       for (const line of this.editor.render(Math.max(10, width))) {
         lines.push(truncateToWidth(line, width));
       }
-    } else {
-      const currentComment = this.comments.get(selectedLine.id);
-      if (currentComment) {
-        lines.push(
-          ...wrapTextWithAnsi(
-            this.theme.fg("text", currentComment.text),
-            width,
+    } else if (this.editMode && this.editingCommentKey) {
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "dim",
+            "Editing comment. Enter saves. Esc or Ctrl+C cancels.",
           ),
-        );
-        lines.push("");
-        lines.push(
-          ...wrapTextWithAnsi(
-            this.theme.fg("dim", "x deletes this comment • c edits"),
-            width,
-          ),
-        );
-      } else {
-        lines.push(
-          ...wrapTextWithAnsi(
-            this.theme.fg("muted", "No comment on this line."),
-            width,
-          ),
-        );
-        lines.push("");
-        lines.push(
-          ...wrapTextWithAnsi(
-            this.theme.fg("dim", "Press c to add one."),
-            width,
-          ),
-        );
+          width,
+        ),
+      );
+      lines.push("");
+      for (const line of this.editor.render(Math.max(10, width))) {
+        lines.push(truncateToWidth(line, width));
       }
+    } else if (currentComment) {
+      lines.push(
+        ...wrapTextWithAnsi(this.theme.fg("text", currentComment.text), width),
+      );
+      lines.push("");
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg("dim", "x deletes this comment • c edits"),
+          width,
+        ),
+      );
+    } else {
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "muted",
+            this.hasSelection()
+              ? "No comment on this range."
+              : "No comment on this line.",
+          ),
+          width,
+        ),
+      );
+      lines.push("");
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "dim",
+            this.hasSelection()
+              ? "Press c to add a range comment."
+              : "Press c to add one. Use J/K to extend a range.",
+          ),
+          width,
+        ),
+      );
     }
 
     lines.push("");
@@ -588,9 +753,13 @@ class ReviewComponent {
         width,
       ),
     );
+    const excerpt = this.lines
+      .slice(selection.start, selection.end + 1)
+      .map((line) => line.text)
+      .join("\n");
     lines.push(
       ...wrapTextWithAnsi(
-        this.theme.fg("toolDiffContext", selectedLine.text || "(blank line)"),
+        this.theme.fg("toolDiffContext", excerpt || "(blank line)"),
         width,
       ),
     );

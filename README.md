@@ -16,8 +16,10 @@ pi install https://github.com/cmpadden/pi-diff-review
 
 - `/review` reviews the current unstaged `git diff`
 - `j/k` or arrow keys to move
+- `J/K` to extend a highlighted selection into a comment range
+- `esc` clears the active selection, or exits review when no selection is active
 - `n/p` to jump hunks
-- `c` to add or edit a comment
-- `x` to delete a comment
+- `c` to add or edit a comment for the current line or selected range
+- `x` to delete a comment for the current line or selected range
 - `R` to submit comments back to pi
-- `q` or `esc` to exit
+- `q` to exit
