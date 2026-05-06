@@ -4,6 +4,8 @@
 
 Easily provide code reviews directly within [pi](https://pi.dev/).
 
+<img width="1232" height="742" alt="image" src="https://github.com/user-attachments/assets/ab6dca6a-2c49-4148-9523-8fa397fad743" />
+
 ## Install
 
 ```bash
