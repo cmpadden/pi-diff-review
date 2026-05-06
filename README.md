@@ -4,7 +4,7 @@
 
 Easily provide code reviews directly within [pi](https://pi.dev/).
 
-<img width="1232" height="742" alt="image" src="https://github.com/user-attachments/assets/ab6dca6a-2c49-4148-9523-8fa397fad743" />
+<img width="1947" height="1103" alt="image" src="https://github.com/user-attachments/assets/3b1e1c51-4c77-4430-8915-1f7d481b64cb" />
 
 ## Install
 
@@ -15,6 +15,7 @@ pi install https://github.com/cmpadden/pi-diff-review
 ## Features
 
 - `/diff` reviews the current unstaged `git diff`
+- `/diff <git-diff-args>` passes arguments through to `git diff` (for example `/diff main...HEAD`)
 - `j/k` or arrow keys to move
 - `J/K` to extend a highlighted selection into a comment range
 - `esc` clears the active selection, or exits review when no selection is active
