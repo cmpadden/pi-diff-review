@@ -1,6 +1,14 @@
+<img width="1400" height="225" alt="pi-diff-review" src="https://github.com/user-attachments/assets/049b2df9-ec38-4a9a-a824-8d682e77dae1" />
+
 # pi-diff-review
 
-Easily provide feedback for local code changes.
+Easily provide code reviews directly within [pi](https://pi.dev/).
+
+## Install
+
+```bash
+pi install https://github.com/cmpadden/pi-diff-review
+```
 
 ## Features
 
@@ -11,16 +19,3 @@ Easily provide feedback for local code changes.
 - `x` to delete a comment
 - `R` to submit comments back to pi
 - `q` or `esc` to exit
-
-## Install
-
-```bash
-pi install https://github.com/cmpadden/pi-diff-review
-```
-
-## Development
-
-```bash
-yarn install
-yarn format
-```
