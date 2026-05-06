@@ -47,8 +47,32 @@ type SelectionBounds = {
   end: number;
 };
 
-function getUnstagedDiff(cwd: string): string {
-  return execFileSync("git", ["diff", "--no-color", "--unified=3"], {
+type DiffSource = {
+  label: string;
+  promptLabel: string;
+  args: string[];
+};
+
+function parseDiffSource(args: string): DiffSource {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return {
+      label: "unstaged git diff",
+      promptLabel: "the current unstaged git diff",
+      args: [],
+    };
+  }
+
+  const gitArgs = trimmed.split(/\s+/).filter(Boolean);
+  return {
+    label: `git diff ${trimmed}`,
+    promptLabel: `\`git diff ${trimmed}\``,
+    args: gitArgs,
+  };
+}
+
+function getDiff(cwd: string, source: DiffSource): string {
+  return execFileSync("git", ["diff", "--no-color", "--unified=3", ...source.args], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -222,7 +246,10 @@ function formatCommentLocation(comment: ReviewComment): string {
   return start === end ? start : `${start} -> ${end}`;
 }
 
-function buildReviewPrompt(comments: ReviewComment[]): string {
+function buildReviewPrompt(
+  comments: ReviewComment[],
+  promptLabel: string,
+): string {
   const body = comments
     .map((comment) => {
       const location = formatCommentLocation(comment);
@@ -233,7 +260,7 @@ function buildReviewPrompt(comments: ReviewComment[]): string {
     })
     .join("\n");
 
-  return `Address this local code review feedback for the current unstaged git diff.\n\n## Review comments\n${body}\n\nPlease apply the feedback and summarize what changed.`;
+  return `Address this local code review feedback for ${promptLabel}.\n\n## Review comments\n${body}\n\nPlease apply the feedback and summarize what changed.`;
 }
 
 function padToWidth(text: string, width: number): string {
@@ -260,6 +287,7 @@ class ReviewComponent {
       terminal?: { rows: number; columns: number };
     },
     private theme: Theme,
+    private title: string,
     private lines: ReviewLine[],
     private comments: Map<string, ReviewComment>,
     private done: (result: ReviewResult) => void,
@@ -387,7 +415,7 @@ class ReviewComponent {
       truncateToWidth(
         this.theme.fg(
           "accent",
-          this.theme.bold("Local Review: unstaged git diff"),
+          this.theme.bold(`Local Review: ${this.title}`),
         ),
         width,
       ),
@@ -769,19 +797,20 @@ class ReviewComponent {
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("diff", {
-    description: "Review the current unstaged git diff in a custom TUI",
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+    description: "Review a git diff in a custom TUI (/diff [git diff args])",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const source = parseDiffSource(args);
       let diffText: string;
       try {
-        diffText = getUnstagedDiff(ctx.cwd);
+        diffText = getDiff(ctx.cwd, source);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Unable to read git diff: ${message}`, "error");
+        ctx.ui.notify(`Unable to read ${source.label}: ${message}`, "error");
         return;
       }
 
       if (!diffText.trim()) {
-        ctx.ui.notify("No unstaged git diff to review.", "info");
+        ctx.ui.notify(`No changes to review for ${source.label}.`, "info");
         return;
       }
 
@@ -789,7 +818,14 @@ export default function (pi: ExtensionAPI) {
       const result = await ctx.ui.custom<ReviewResult>(
         (tui, theme, _keybindings, done) => {
           const comments = new Map<string, ReviewComment>();
-          return new ReviewComponent(tui, theme, reviewLines, comments, done);
+          return new ReviewComponent(
+            tui,
+            theme,
+            source.label,
+            reviewLines,
+            comments,
+            done,
+          );
         },
       );
 
@@ -799,7 +835,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      pi.sendUserMessage(buildReviewPrompt(result.comments));
+      pi.sendUserMessage(buildReviewPrompt(result.comments, source.promptLabel));
     },
   });
 }
