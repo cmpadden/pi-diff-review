@@ -1,0 +1,24 @@
+{
+  "name": "pi-diff-review",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local diff review TUI extension for pi",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}
