@@ -768,7 +768,7 @@ class ReviewComponent {
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.registerCommand("review", {
+  pi.registerCommand("diff", {
     description: "Review the current unstaged git diff in a custom TUI",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       let diffText: string;
