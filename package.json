@@ -1,10 +1,28 @@
 {
   "name": "pi-diff-review",
   "version": "0.1.0",
-  "private": true,
   "description": "Local diff review TUI extension for pi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cmpadden/pi-diff-review.git"
+  },
+  "homepage": "https://github.com/cmpadden/pi-diff-review#readme",
+  "bugs": {
+    "url": "https://github.com/cmpadden/pi-diff-review/issues"
+  },
   "keywords": [
+    "code-review",
+    "git-diff",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
     "pi-package"
+  ],
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "format": "prettier --write ."
