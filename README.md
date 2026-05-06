@@ -8,6 +8,16 @@ Easily provide code reviews directly within [pi](https://pi.dev/).
 
 ## Install
 
+Install from npm:
+
+```bash
+pi install npm:pi-diff-review
+```
+
+Package: https://www.npmjs.com/package/pi-diff-review
+
+Or install directly from GitHub:
+
 ```bash
 pi install https://github.com/cmpadden/pi-diff-review
 ```
