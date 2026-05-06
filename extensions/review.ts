@@ -5,6 +5,7 @@ import type {
   Theme,
 } from "@mariozechner/pi-coding-agent";
 import {
+  Editor,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -224,7 +225,9 @@ function lineNumberCell(value?: number): string {
 class ReviewComponent {
   private selected = 0;
   private scrollTop = 0;
-  private busy = false;
+  private editMode = false;
+  private editingLineId?: string;
+  private editor: Editor;
 
   constructor(
     private tui: {
@@ -234,18 +237,57 @@ class ReviewComponent {
     private theme: Theme,
     private lines: ReviewLine[],
     private comments: Map<string, ReviewComment>,
-    private onComment: (
-      line: ReviewLine,
-      existing?: ReviewComment,
-    ) => Promise<ReviewComment | null | undefined>,
     private done: (result: ReviewResult) => void,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.selected = firstCommentable >= 0 ? firstCommentable : 0;
+
+    this.editor = new Editor(tui as never, {
+      borderColor: (s) => theme.fg("accent", s),
+      selectList: {
+        selectedPrefix: (t) => theme.fg("accent", t),
+        selectedText: (t) => theme.fg("accent", t),
+        description: (t) => theme.fg("muted", t),
+        scrollInfo: (t) => theme.fg("dim", t),
+        noMatch: (t) => theme.fg("warning", t),
+      },
+    });
+
+    this.editor.onSubmit = (value) => {
+      const line = this.lines[this.selected];
+      if (!line?.commentable) {
+        this.exitEditMode();
+        return;
+      }
+
+      const trimmed = value.trim();
+      if (!trimmed) {
+        this.comments.delete(line.id);
+      } else {
+        this.comments.set(line.id, {
+          id: line.id,
+          filePath: line.filePath ?? "(unknown file)",
+          text: trimmed,
+          oldLineNumber: line.oldLineNumber,
+          newLineNumber: line.newLineNumber,
+          lineText: line.text,
+        });
+      }
+
+      this.exitEditMode();
+    };
   }
 
   handleInput(data: string): void {
-    if (this.busy) return;
+    if (this.editMode) {
+      if (matchesKey(data, "escape")) {
+        this.exitEditMode();
+        return;
+      }
+      this.editor.handleInput(data);
+      this.tui.requestRender();
+      return;
+    }
 
     if (matchesKey(data, "escape") || data === "q") {
       this.done({ action: "cancel" });
@@ -272,7 +314,7 @@ class ReviewComponent {
       return;
     }
     if (data === "c") {
-      void this.editComment();
+      this.startEditMode();
       return;
     }
     if (data === "R") {
@@ -320,7 +362,9 @@ class ReviewComponent {
       truncateToWidth(
         this.theme.fg(
           "dim",
-          `${this.lines.length} lines • ${this.comments.size} comments • j/k move • c comment • x delete • n/p hunk • R submit • q quit`,
+          this.editMode
+            ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
+            : `${this.lines.length} lines • ${this.comments.size} comments • j/k move • c comment • x delete • n/p hunk • R submit • q quit`,
         ),
         width,
       ),
@@ -383,23 +427,21 @@ class ReviewComponent {
     this.tui.requestRender();
   }
 
-  private async editComment(): Promise<void> {
+  private startEditMode(): void {
     const line = this.lines[this.selected];
     if (!line?.commentable) return;
+    const existing = this.comments.get(line.id);
+    this.editMode = true;
+    this.editingLineId = line.id;
+    this.editor.setText(existing?.text ?? "");
+    this.tui.requestRender(true);
+  }
 
-    this.busy = true;
-    try {
-      const existing = this.comments.get(line.id);
-      const updated = await this.onComment(line, existing);
-      if (updated === null) {
-        this.comments.delete(line.id);
-      } else if (updated) {
-        this.comments.set(line.id, updated);
-      }
-    } finally {
-      this.busy = false;
-      this.tui.requestRender(true);
-    }
+  private exitEditMode(): void {
+    this.editMode = false;
+    this.editingLineId = undefined;
+    this.editor.setText("");
+    this.tui.requestRender(true);
   }
 
   private ensureScroll(viewportHeight: number): void {
@@ -492,29 +534,51 @@ class ReviewComponent {
       return lines.slice(0, height);
     }
 
-    const currentComment = this.comments.get(selectedLine.id);
-    if (currentComment) {
-      lines.push(
-        ...wrapTextWithAnsi(this.theme.fg("text", currentComment.text), width),
-      );
-      lines.push("");
+    if (this.editMode && this.editingLineId === selectedLine.id) {
       lines.push(
         ...wrapTextWithAnsi(
-          this.theme.fg("dim", "x deletes this comment"),
+          this.theme.fg(
+            "dim",
+            "Editing comment. Enter saves. Esc or Ctrl+C cancels.",
+          ),
           width,
         ),
       );
+      lines.push("");
+      for (const line of this.editor.render(Math.max(10, width))) {
+        lines.push(truncateToWidth(line, width));
+      }
     } else {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg("muted", "No comment on this line."),
-          width,
-        ),
-      );
-      lines.push("");
-      lines.push(
-        ...wrapTextWithAnsi(this.theme.fg("dim", "Press c to add one."), width),
-      );
+      const currentComment = this.comments.get(selectedLine.id);
+      if (currentComment) {
+        lines.push(
+          ...wrapTextWithAnsi(
+            this.theme.fg("text", currentComment.text),
+            width,
+          ),
+        );
+        lines.push("");
+        lines.push(
+          ...wrapTextWithAnsi(
+            this.theme.fg("dim", "x deletes this comment • c edits"),
+            width,
+          ),
+        );
+      } else {
+        lines.push(
+          ...wrapTextWithAnsi(
+            this.theme.fg("muted", "No comment on this line."),
+            width,
+          ),
+        );
+        lines.push("");
+        lines.push(
+          ...wrapTextWithAnsi(
+            this.theme.fg("dim", "Press c to add one."),
+            width,
+          ),
+        );
+      }
     }
 
     lines.push("");
@@ -556,31 +620,7 @@ export default function (pi: ExtensionAPI) {
       const result = await ctx.ui.custom<ReviewResult>(
         (tui, theme, _keybindings, done) => {
           const comments = new Map<string, ReviewComment>();
-          return new ReviewComponent(
-            tui,
-            theme,
-            reviewLines,
-            comments,
-            async (line, existing) => {
-              const location = formatLocation(line);
-              const value = await ctx.ui.editor(
-                `Comment: ${location}`,
-                existing?.text ?? "",
-              );
-              if (value == null) return undefined;
-              const trimmed = value.trim();
-              if (!trimmed) return null;
-              return {
-                id: line.id,
-                filePath: line.filePath ?? "(unknown file)",
-                text: trimmed,
-                oldLineNumber: line.oldLineNumber,
-                newLineNumber: line.newLineNumber,
-                lineText: line.text,
-              };
-            },
-            done,
-          );
+          return new ReviewComponent(tui, theme, reviewLines, comments, done);
         },
       );
 
