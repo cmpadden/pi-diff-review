@@ -702,12 +702,6 @@ class ReviewComponent {
 
     output.push(
       truncateToWidth(
-        this.theme.fg("accent", this.theme.bold(`Local Review: ${this.title}`)),
-        width,
-      ),
-    );
-    output.push(
-      truncateToWidth(
         this.theme.fg(
           "dim",
           this.editMode
@@ -719,8 +713,6 @@ class ReviewComponent {
         width,
       ),
     );
-    output.push(this.theme.fg("border", "─".repeat(width)));
-
     if (this.layout === "side-by-side") {
       this.ensureScroll(viewportHeight);
       output.push(
@@ -735,7 +727,6 @@ class ReviewComponent {
       );
     }
 
-    output.push(this.theme.fg("border", "─".repeat(width)));
     output.push(
       truncateToWidth(
         this.theme.fg("muted", this.getFooterText(selectedLine)),
