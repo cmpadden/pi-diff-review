@@ -4,9 +4,16 @@ Releases are published by pushing a version tag that matches `package.json`.
 
 ## One-time setup
 
-Configure the repository secret used by the release workflow:
+Configure npm Trusted Publishing for this package instead of using a long-lived token:
 
-- `NPM_TOKEN`: an npm automation/publish token for `pi-diff-review`
+1. Open the package on npm.
+2. Go to package settings / publishing access.
+3. Add a trusted publisher for GitHub Actions.
+4. Use this repository and workflow:
+   - Repository: `cmpadden/pi-diff-review`
+   - Workflow: `release.yml`
+
+No `NPM_TOKEN` repository secret is required.
 
 ## Publish a release
 

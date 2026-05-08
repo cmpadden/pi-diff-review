@@ -40,6 +40,9 @@ jobs:
           echo "name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Update npm
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: npm install --no-package-lock
 
@@ -55,8 +58,6 @@ jobs:
 
       - name: Publish to npm
         run: npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub release
         env:
