@@ -38,6 +38,12 @@ export class ReviewComponent {
   private layout: ReviewLayout = "side-by-side";
   private diffRenderMode: DiffRenderMode = "unified";
   private editor: Editor;
+  private splitRows?: SplitDiffRow[];
+  private splitRowByLineIndex?: number[];
+  private lineIndexById = new Map<string, number>();
+  private commentLineKeys = new Map<number, string[]>();
+  private commentsRevision = 0;
+  private commentLineKeysRevision = -1;
 
   constructor(
     private tui: ReviewTui,
@@ -49,6 +55,7 @@ export class ReviewComponent {
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.selected = firstCommentable >= 0 ? firstCommentable : 0;
+    this.lines.forEach((line, index) => this.lineIndexById.set(line.id, index));
 
     this.editor = new Editor(tui as never, {
       borderColor: (s) => theme.fg("accent", s),
@@ -71,12 +78,13 @@ export class ReviewComponent {
       const trimmed = value.trim();
       const key = this.getSelectionKey(selection.start, selection.end);
       if (!trimmed) {
-        this.comments.delete(key);
+        if (this.comments.delete(key)) this.markCommentsChanged();
       } else {
         this.comments.set(
           key,
           this.buildCommentFromSelection(selection, trimmed),
         );
+        this.markCommentsChanged();
       }
 
       this.exitEditMode();
@@ -276,7 +284,7 @@ export class ReviewComponent {
   }
 
   private renderSplitDiffRows(width: number, height: number): string[] {
-    const rows = this.buildSplitDiffRows();
+    const rows = this.getSplitDiffRows();
     const output: string[] = [];
     const separatorWidth = 3;
     const leftWidth = Math.max(10, Math.floor((width - separatorWidth) / 2));
@@ -345,17 +353,25 @@ export class ReviewComponent {
   invalidate(): void {}
 
   private move(delta: number): void {
-    this.selected = Math.max(
+    const next = Math.max(
       0,
       Math.min(this.lines.length - 1, this.selected + delta),
     );
+    if (next === this.selected) return;
+    this.selected = next;
     this.tui.requestRender();
   }
 
   private jumpToBoundary(boundary: "start" | "end"): void {
-    this.selected =
-      boundary === "start" ? 0 : Math.max(0, this.lines.length - 1);
-    this.clearSelection();
+    const next = boundary === "start" ? 0 : Math.max(0, this.lines.length - 1);
+    const hadSelection = this.selectionAnchor != null;
+    if (next === this.selected && !hadSelection) return;
+    this.selected = next;
+    if (hadSelection) {
+      this.clearSelection();
+    } else {
+      this.tui.requestRender();
+    }
   }
 
   private toggleLayout(): void {
@@ -383,14 +399,17 @@ export class ReviewComponent {
     if (this.selectionAnchor == null) {
       this.selectionAnchor = this.selected;
     }
-    this.selected = Math.max(
+    const next = Math.max(
       0,
       Math.min(this.lines.length - 1, this.selected + delta),
     );
+    if (next === this.selected) return;
+    this.selected = next;
     this.tui.requestRender();
   }
 
   private clearSelection(): void {
+    if (this.selectionAnchor == null) return;
     this.selectionAnchor = undefined;
     this.tui.requestRender();
   }
@@ -431,19 +450,35 @@ export class ReviewComponent {
   }
 
   private getCommentKeysForLine(index: number): string[] {
-    const line = this.lines[index];
-    if (!line) return [];
-    return [...this.comments.entries()]
-      .filter(([, comment]) => {
-        const start = this.lines.findIndex(
-          (item) => item.id === comment.startLineId,
-        );
-        const end = this.lines.findIndex(
-          (item) => item.id === comment.endLineId,
-        );
-        return start !== -1 && end !== -1 && index >= start && index <= end;
-      })
-      .map(([key]) => key);
+    this.ensureCommentLineKeys();
+    return this.commentLineKeys.get(index) ?? [];
+  }
+
+  private markCommentsChanged(): void {
+    this.commentsRevision++;
+  }
+
+  private ensureCommentLineKeys(): void {
+    if (this.commentLineKeysRevision === this.commentsRevision) return;
+
+    this.commentLineKeys = new Map<number, string[]>();
+    for (const [key, comment] of this.comments) {
+      const start = this.lineIndexById.get(comment.startLineId);
+      const end = this.lineIndexById.get(comment.endLineId);
+      if (start == null || end == null) continue;
+      const from = Math.min(start, end);
+      const to = Math.max(start, end);
+      for (let index = from; index <= to; index++) {
+        const keys = this.commentLineKeys.get(index);
+        if (keys) {
+          keys.push(key);
+        } else {
+          this.commentLineKeys.set(index, [key]);
+        }
+      }
+    }
+
+    this.commentLineKeysRevision = this.commentsRevision;
   }
 
   private buildCommentFromSelection(
@@ -503,7 +538,11 @@ export class ReviewComponent {
   private deleteComment(): void {
     const selection = this.getActiveCommentSelection();
     if (!selection) return;
-    this.comments.delete(this.getSelectionKey(selection.start, selection.end));
+    if (
+      this.comments.delete(this.getSelectionKey(selection.start, selection.end))
+    ) {
+      this.markCommentsChanged();
+    }
     this.tui.requestRender();
   }
 
@@ -532,9 +571,23 @@ export class ReviewComponent {
     this.tui.requestRender(true);
   }
 
-  private buildSplitDiffRows(): SplitDiffRow[] {
+  private getSplitDiffRows(): SplitDiffRow[] {
+    if (this.splitRows) return this.splitRows;
+
     const rows: SplitDiffRow[] = [];
+    const rowByLineIndex: number[] = [];
     let index = 0;
+
+    const pushRow = (row: SplitDiffRow) => {
+      const displayRow = rows.length;
+      rows.push(row);
+      if (row.kind === "full") {
+        rowByLineIndex[row.cell.index] = displayRow;
+      } else {
+        if (row.left) rowByLineIndex[row.left.index] = displayRow;
+        if (row.right) rowByLineIndex[row.right.index] = displayRow;
+      }
+    };
 
     while (index < this.lines.length) {
       const line = this.lines[index]!;
@@ -554,7 +607,7 @@ export class ReviewComponent {
 
         const count = Math.max(removals.length, additions.length);
         for (let offset = 0; offset < count; offset++) {
-          rows.push({
+          pushRow({
             kind: "split",
             left: removals[offset],
             right: additions[offset],
@@ -565,32 +618,28 @@ export class ReviewComponent {
 
       if (line.kind === "context") {
         const cell = { line, index };
-        rows.push({ kind: "split", left: cell, right: cell });
+        pushRow({ kind: "split", left: cell, right: cell });
       } else {
-        rows.push({ kind: "full", cell: { line, index } });
+        pushRow({ kind: "full", cell: { line, index } });
       }
       index++;
     }
 
+    this.splitRows = rows;
+    this.splitRowByLineIndex = rowByLineIndex;
     return rows;
   }
 
   private getSelectedDisplayRow(): number {
     if (this.diffRenderMode === "unified") return this.selected;
-    const rows = this.buildSplitDiffRows();
-    const row = rows.findIndex((item) =>
-      item.kind === "full"
-        ? item.cell.index === this.selected
-        : item.left?.index === this.selected ||
-          item.right?.index === this.selected,
-    );
-    return row === -1 ? 0 : row;
+    this.getSplitDiffRows();
+    return this.splitRowByLineIndex?.[this.selected] ?? 0;
   }
 
   private getDisplayRowCount(): number {
     return this.diffRenderMode === "unified"
       ? this.lines.length
-      : this.buildSplitDiffRows().length;
+      : this.getSplitDiffRows().length;
   }
 
   private renderSplitDiffCell(
