@@ -4,7 +4,7 @@ import {
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import { formatLocation } from "./prompt.ts";
 import type {
   DiffRenderMode,

@@ -1,7 +1,7 @@
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { getDiff, parseDiffSource } from "./diff-source.ts";
 import { parseDiff } from "./diff-parser.ts";
 import { buildReviewPrompt } from "./prompt.ts";
