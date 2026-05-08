@@ -34,5 +34,5 @@ pi install https://github.com/cmpadden/pi-diff-review
 - `n/p` to jump hunks
 - `c` to add or edit a comment for the current line or selected range
 - `x` to delete a comment for the current line or selected range
-- `R` to submit comments back to pi
+- `Enter` to submit comments back to pi
 - `q` to exit

@@ -150,7 +150,7 @@ export class ReviewComponent {
       this.startEditMode();
       return;
     }
-    if (data === "R") {
+    if (matchesKey(data, "enter")) {
       const comments = [...this.comments.values()].sort((a, b) =>
         a.id.localeCompare(b.id),
       );
@@ -171,8 +171,8 @@ export class ReviewComponent {
           this.editMode
             ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
-              ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • R submit`
-              : `${this.lines.length} lines • ${this.comments.size} comments • j/k move • ctrl-u/d page • t unified/split • J/K extend • c comment • x delete • n/p hunk • R submit • q quit`,
+              ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • Enter submit`
+              : `${this.lines.length} lines • ${this.comments.size} comments • j/k move • ctrl-u/d page • t unified/split • J/K extend • c comment • x delete • n/p hunk • Enter submit • q quit`,
         ),
         width,
       ),
