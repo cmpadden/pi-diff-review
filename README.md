@@ -4,7 +4,7 @@
 
 Easily provide code reviews directly within [pi](https://pi.dev/).
 
-<img width="1947" height="1103" alt="image" src="https://github.com/user-attachments/assets/3b1e1c51-4c77-4430-8915-1f7d481b64cb" />
+<img width="1095" height="853" alt="pi-diff-review-screenshot" src="https://github.com/user-attachments/assets/f1a39117-f2a6-4ee7-bf72-a299990ab1dd" />
 
 ## Install
 
