@@ -2,7 +2,7 @@
 
 # pi-diff-review
 
-Easily provide code reviews directly within [pi](https://pi.dev/).
+Embedded code reviews directly directly within [pi](https://pi.dev/).
 
 <img width="1986" height="1556" alt="pi-diff-review-screenshot(1)" src="https://github.com/user-attachments/assets/3fd00163-5d19-489b-94ed-3d4816c6cad3" />
 
@@ -13,8 +13,6 @@ Install from npm:
 ```bash
 pi install npm:pi-diff-review
 ```
-
-Package: https://www.npmjs.com/package/pi-diff-review
 
 Or install directly from GitHub:
 
