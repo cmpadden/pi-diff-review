@@ -6,19 +6,20 @@ import { getDiff, parseDiffSource } from "./diff-source.ts";
 import { parseDiff } from "./diff-parser.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { ReviewComponent } from "./review-component.ts";
-import type { ReviewComment, ReviewResult } from "./types.ts";
+import type { DiffSource, ReviewComment, ReviewResult } from "./types.ts";
 
 export function registerDiffReviewCommand(pi: ExtensionAPI): void {
   pi.registerCommand("diff", {
     description: "Review a git diff in a custom TUI (/diff [git diff args])",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
-      const source = parseDiffSource(args);
+      let source: DiffSource;
       let diffText: string;
       try {
+        source = parseDiffSource(args);
         diffText = getDiff(ctx.cwd, source);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Unable to read ${source.label}: ${message}`, "error");
+        ctx.ui.notify(`Unable to read diff: ${message}`, "error");
         return;
       }
 

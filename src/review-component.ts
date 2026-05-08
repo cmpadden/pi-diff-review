@@ -126,6 +126,14 @@ export class ReviewComponent {
       this.move(-1);
       return;
     }
+    if (data === "g") {
+      this.jumpToBoundary("start");
+      return;
+    }
+    if (data === "G") {
+      this.jumpToBoundary("end");
+      return;
+    }
     if (data === "J") {
       this.extendSelection(1);
       return;
@@ -172,7 +180,7 @@ export class ReviewComponent {
             ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
               ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • Enter submit`
-              : `${this.lines.length} lines • ${this.comments.size} comments • j/k move • ctrl-u/d page • t unified/split • J/K extend • c comment • x delete • n/p hunk • Enter submit • q quit`,
+              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • j/k move • g/G top/bottom • ctrl-u/d page • t unified/split • J/K extend • c comment • x delete • n/p hunk • Enter submit • q quit`,
         ),
         width,
       ),
@@ -344,6 +352,12 @@ export class ReviewComponent {
     this.tui.requestRender();
   }
 
+  private jumpToBoundary(boundary: "start" | "end"): void {
+    this.selected =
+      boundary === "start" ? 0 : Math.max(0, this.lines.length - 1);
+    this.clearSelection();
+  }
+
   private toggleLayout(): void {
     this.layout = this.layout === "side-by-side" ? "stacked" : "side-by-side";
     this.tui.requestRender(true);
@@ -454,6 +468,13 @@ export class ReviewComponent {
       endNewLineNumber: endLine.newLineNumber,
       lineText: excerpt,
     };
+  }
+
+  private getPositionText(selectedLine?: ReviewLine): string {
+    const position = `${Math.min(this.selected + 1, this.lines.length)}/${this.lines.length}`;
+    return selectedLine?.filePath
+      ? `${position} ${selectedLine.filePath}`
+      : position;
   }
 
   private getFooterText(selectedLine?: ReviewLine): string {
