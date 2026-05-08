@@ -21,6 +21,7 @@
   ],
   "files": [
     "extensions",
+    "src",
     "README.md",
     "LICENSE"
   ],
