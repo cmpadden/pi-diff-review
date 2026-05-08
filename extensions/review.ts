@@ -1127,7 +1127,7 @@ class ReviewComponent {
     const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
     const lineNumber =
       side === "left" ? line.oldLineNumber : line.newLineNumber;
-    const raw = `${commentMark} ${lineNumberCell(lineNumber)} ${line.text}`;
+    const raw = `${commentMark} ${lineNumberCell(lineNumber)} ${this.getDisplayText(line)}`;
 
     let styled: string;
     switch (line.kind) {
@@ -1170,6 +1170,14 @@ class ReviewComponent {
     );
   }
 
+  private getDisplayText(line: ReviewLine): string {
+    return line.kind === "add" ||
+      line.kind === "remove" ||
+      line.kind === "context"
+      ? line.text.slice(1)
+      : line.text;
+  }
+
   private renderDiffLine(
     line: ReviewLine,
     index: number,
@@ -1180,7 +1188,7 @@ class ReviewComponent {
     const hasComment = this.getCommentKeysForLine(index).length > 0;
     const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
     const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
-    const raw = `${commentMark} ${numbers} ${line.text}`;
+    const raw = `${commentMark} ${numbers} ${this.getDisplayText(line)}`;
 
     let styled: string;
     switch (line.kind) {
