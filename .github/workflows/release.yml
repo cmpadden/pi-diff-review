@@ -21,7 +21,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Validate tag matches package version
@@ -40,8 +40,10 @@ jobs:
           echo "name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Update npm
-        run: npm install -g npm@latest
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
 
       - name: Install dependencies
         run: npm install --no-package-lock
