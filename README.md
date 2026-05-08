@@ -36,3 +36,7 @@ pi install https://github.com/cmpadden/pi-diff-review
 - `x` to delete a comment for the current line or selected range
 - `Enter` to submit comments back to pi
 - `q` to exit
+
+## Release
+
+See [RELEASE.md](./RELEASE.md).
