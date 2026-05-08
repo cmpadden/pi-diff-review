@@ -27,6 +27,8 @@ pi install https://github.com/cmpadden/pi-diff-review
 - `/diff` reviews the current unstaged `git diff`
 - `/diff <git-diff-args>` passes arguments through to `git diff` (for example `/diff main...HEAD`)
 - `j/k` or arrow keys to move
+- `ctrl-u` / `ctrl-d` to move up/down by half a page
+- `t` toggles the diff between unified and side-by-side split rendering
 - `J/K` to extend a highlighted selection into a comment range
 - `esc` clears the active selection, or exits review when no selection is active
 - `n/p` to jump hunks
