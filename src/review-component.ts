@@ -1,4 +1,8 @@
 import {
+  getLanguageFromPath,
+  highlightCode,
+} from "@earendil-works/pi-coding-agent";
+import {
   Editor,
   matchesKey,
   truncateToWidth,
@@ -58,6 +62,7 @@ export class ReviewComponent {
   private commentLineKeys = new Map<number, string[]>();
   private commentsRevision = 0;
   private commentLineKeysRevision = -1;
+  private highlightedLineCache = new Map<string, string>();
 
   constructor(
     private tui: ReviewTui,
@@ -389,7 +394,9 @@ export class ReviewComponent {
     return { diffHeight, commentsHeight };
   }
 
-  invalidate(): void {}
+  invalidate(): void {
+    this.highlightedLineCache.clear();
+  }
 
   dispose(): void {
     this.explanationAbort?.abort();
@@ -728,22 +735,8 @@ export class ReviewComponent {
     const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
     const lineNumber =
       side === "left" ? line.oldLineNumber : line.newLineNumber;
-    const raw = `${commentMark} ${lineNumberCell(lineNumber)} ${this.getDisplayText(line)}`;
-
-    let styled: string;
-    switch (line.kind) {
-      case "add":
-        styled = this.theme.fg("toolDiffAdded", raw);
-        break;
-      case "remove":
-        styled = this.theme.fg("toolDiffRemoved", raw);
-        break;
-      case "context":
-        styled = this.theme.fg("toolDiffContext", raw);
-        break;
-      default:
-        styled = this.theme.fg("muted", raw);
-    }
+    const prefix = `${commentMark} ${lineNumberCell(lineNumber)} `;
+    let styled = this.renderDiffRowContent(line, prefix);
 
     styled = truncateToWidth(styled, width);
     const selection = this.getSelectionBounds();
@@ -752,7 +745,7 @@ export class ReviewComponent {
     if (index === this.selected || inSelection) {
       return this.theme.bg("selectedBg", padToWidth(styled, width));
     }
-    return styled;
+    return this.applyDiffBackground(line, styled, width);
   }
 
   private ensureScroll(viewportHeight: number): void {
@@ -779,6 +772,55 @@ export class ReviewComponent {
       : line.text;
   }
 
+  private applyDiffBackground(
+    line: ReviewLine,
+    styled: string,
+    width: number,
+  ): string {
+    if (line.kind === "add") {
+      return this.theme.bg("toolSuccessBg", padToWidth(styled, width));
+    }
+    if (line.kind === "remove") {
+      return this.theme.bg("toolErrorBg", padToWidth(styled, width));
+    }
+    return styled;
+  }
+
+  private renderDiffRowContent(line: ReviewLine, prefix: string): string {
+    switch (line.kind) {
+      case "add":
+        return `${this.theme.fg("toolDiffAdded", prefix)}${this.getHighlightedDisplayText(line)}`;
+      case "remove":
+        return `${this.theme.fg("toolDiffRemoved", prefix)}${this.getHighlightedDisplayText(line)}`;
+      case "context":
+        return `${this.theme.fg("toolDiffContext", prefix)}${this.getHighlightedDisplayText(line)}`;
+      case "hunk":
+        return this.theme.fg("accent", `${prefix}${this.getDisplayText(line)}`);
+      default:
+        return this.theme.fg("muted", `${prefix}${this.getDisplayText(line)}`);
+    }
+  }
+
+  private getHighlightedDisplayText(line: ReviewLine): string {
+    const code = this.getDisplayText(line);
+    if (!code) return code;
+
+    const lang = line.filePath ? getLanguageFromPath(line.filePath) : undefined;
+    const cacheKey = `${line.id}\0${lang ?? ""}\0${code}`;
+    const cached = this.highlightedLineCache.get(cacheKey);
+    if (cached != null) return cached;
+
+    let highlighted = code;
+    try {
+      highlighted = highlightCode(code, lang)[0] ?? code;
+    } catch {
+      highlighted = code;
+    }
+
+    this.highlightedLineCache.set(cacheKey, highlighted);
+    return highlighted;
+  }
+
   private renderDiffLine(
     line: ReviewLine,
     index: number,
@@ -789,25 +831,8 @@ export class ReviewComponent {
     const hasComment = this.getCommentKeysForLine(index).length > 0;
     const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
     const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
-    const raw = `${commentMark} ${numbers} ${this.getDisplayText(line)}`;
-
-    let styled: string;
-    switch (line.kind) {
-      case "add":
-        styled = this.theme.fg("toolDiffAdded", raw);
-        break;
-      case "remove":
-        styled = this.theme.fg("toolDiffRemoved", raw);
-        break;
-      case "context":
-        styled = this.theme.fg("toolDiffContext", raw);
-        break;
-      case "hunk":
-        styled = this.theme.fg("accent", raw);
-        break;
-      default:
-        styled = this.theme.fg("muted", raw);
-    }
+    const prefix = `${commentMark} ${numbers} `;
+    let styled = this.renderDiffRowContent(line, prefix);
 
     styled = truncateToWidth(styled, width);
     const inSelection =
@@ -815,7 +840,7 @@ export class ReviewComponent {
     if (selected || inSelection) {
       return this.theme.bg("selectedBg", padToWidth(styled, width));
     }
-    return styled;
+    return this.applyDiffBackground(line, styled, width);
   }
 
   private renderRightPane(
