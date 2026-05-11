@@ -20,6 +20,13 @@ Or install directly from GitHub:
 pi install https://github.com/cmpadden/pi-diff-review
 ```
 
+For local development, clone the repository and install from the local path:
+
+```bash
+git clone https://github.com/cmpadden/pi-diff-review
+pi install ./pi-diff-review
+```
+
 ## Features
 
 - `/diff` reviews the current unstaged `git diff`
