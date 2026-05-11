@@ -5,6 +5,11 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import type {
+  DiffExplainer,
+  ExplanationScope,
+  ExplanationState,
+} from "./explain.ts";
 import { formatLocation } from "./prompt.ts";
 import type {
   DiffRenderMode,
@@ -14,6 +19,7 @@ import type {
   ReviewResult,
   ReviewTheme,
   ReviewTui,
+  RightPaneMode,
   SelectionBounds,
   SplitDiffCell,
   SplitDiffRow,
@@ -37,6 +43,12 @@ export class ReviewComponent {
   private selectionAnchor?: number;
   private layout: ReviewLayout = "side-by-side";
   private diffRenderMode: DiffRenderMode = "unified";
+  private rightPaneMode: RightPaneMode = "comments";
+  private explanations = new Map<string, ExplanationState>();
+  private explanationAbort?: AbortController;
+  private explanationRequestId = 0;
+  private loadingFrame = 0;
+  private loadingTimer?: ReturnType<typeof setInterval>;
   private editor: Editor;
   private splitRows?: SplitDiffRow[];
   private splitRowByLineIndex?: number[];
@@ -52,6 +64,7 @@ export class ReviewComponent {
     private lines: ReviewLine[],
     private comments: Map<string, ReviewComment>,
     private done: (result: ReviewResult) => void,
+    private explainer?: DiffExplainer,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.selected = firstCommentable >= 0 ? firstCommentable : 0;
@@ -116,6 +129,10 @@ export class ReviewComponent {
     }
     if (data === "t") {
       this.toggleDiffRenderMode();
+      return;
+    }
+    if (data === "?") {
+      this.toggleExplanationPane();
       return;
     }
     if (matchesKey(data, "ctrl+d")) {
@@ -188,7 +205,7 @@ export class ReviewComponent {
             ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
               ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • Enter submit`
-              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • j/k move • g/G top/bottom • ctrl-u/d page • t unified/split • J/K extend • c comment • x delete • n/p hunk • Enter submit • q quit`,
+              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • j/k move • g/G top/bottom • ctrl-u/d page • t unified/split • ? explain • J/K extend • c comment • x delete • n/p hunk • Enter submit • q quit`,
         ),
         width,
       ),
@@ -352,6 +369,11 @@ export class ReviewComponent {
 
   invalidate(): void {}
 
+  dispose(): void {
+    this.explanationAbort?.abort();
+    this.stopLoadingTimer();
+  }
+
   private move(delta: number): void {
     const next = Math.max(
       0,
@@ -383,6 +405,15 @@ export class ReviewComponent {
     this.diffRenderMode =
       this.diffRenderMode === "unified" ? "split" : "unified";
     this.scrollTop = 0;
+    this.tui.requestRender(true);
+  }
+
+  private toggleExplanationPane(): void {
+    this.rightPaneMode =
+      this.rightPaneMode === "comments" ? "explanation" : "comments";
+    if (this.rightPaneMode === "explanation") {
+      this.ensureCurrentExplanation();
+    }
     this.tui.requestRender(true);
   }
 
@@ -747,6 +778,16 @@ export class ReviewComponent {
     height: number,
     selectedLine?: ReviewLine,
   ): string[] {
+    return this.rightPaneMode === "explanation"
+      ? this.renderExplanationPane(width, height, selectedLine)
+      : this.renderCommentsPane(width, height, selectedLine);
+  }
+
+  private renderCommentsPane(
+    width: number,
+    height: number,
+    selectedLine?: ReviewLine,
+  ): string[] {
     const lines: string[] = [];
     const title = this.theme.fg("accent", this.theme.bold("Comments"));
     const selection = this.getActiveCommentSelection();
@@ -874,5 +915,205 @@ export class ReviewComponent {
       ),
     );
     return lines.slice(0, height);
+  }
+
+  private renderExplanationPane(
+    width: number,
+    height: number,
+    selectedLine?: ReviewLine,
+  ): string[] {
+    const lines: string[] = [];
+    const title = this.theme.fg("accent", this.theme.bold("Explanation"));
+    const scope = this.getCurrentHunkScope();
+
+    lines.push(truncateToWidth(title, width));
+    lines.push(
+      truncateToWidth(
+        this.theme.fg(
+          "dim",
+          scope?.title ??
+            (selectedLine ? formatLocation(selectedLine) : "No selection"),
+        ),
+        width,
+      ),
+    );
+    lines.push("");
+
+    if (!this.explainer) {
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg("warning", "Diff explanations are unavailable."),
+          width,
+        ),
+      );
+      return lines.slice(0, height);
+    }
+
+    if (!scope) {
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "muted",
+            "Move to a changed hunk and press ? to generate an explanation.",
+          ),
+          width,
+        ),
+      );
+      return lines.slice(0, height);
+    }
+
+    const explanation = this.explanations.get(scope.key);
+    if (!explanation) {
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "muted",
+            "No explanation generated yet. Press ? again after returning to comments to generate this hunk.",
+          ),
+          width,
+        ),
+      );
+    } else if (explanation.status === "loading") {
+      const spinner = this.getLoadingFrame();
+      lines.push(
+        truncateToWidth(
+          this.theme.fg("accent", `${spinner} Generating explanation...`),
+          width,
+        ),
+      );
+      if (explanation.text.trim()) {
+        lines.push("");
+        lines.push(
+          ...wrapTextWithAnsi(this.theme.fg("text", explanation.text), width),
+        );
+      }
+    } else if (explanation.status === "error") {
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "warning",
+            `Unable to explain diff: ${explanation.message}`,
+          ),
+          width,
+        ),
+      );
+    } else {
+      lines.push(
+        ...wrapTextWithAnsi(this.theme.fg("text", explanation.text), width),
+      );
+    }
+
+    lines.push("");
+    lines.push(...wrapTextWithAnsi(this.theme.fg("dim", "? comments"), width));
+    return lines.slice(0, height);
+  }
+
+  private ensureCurrentExplanation(): void {
+    const scope = this.getCurrentHunkScope();
+    if (!scope || !this.explainer) return;
+    if (this.explanations.has(scope.key)) return;
+
+    this.explanationAbort?.abort();
+    const controller = new AbortController();
+    this.explanationAbort = controller;
+    const requestId = ++this.explanationRequestId;
+    let text = "";
+
+    this.explanations.set(scope.key, { status: "loading", text });
+    this.startLoadingTimer();
+
+    void this.explainer
+      .explain(scope, {
+        signal: controller.signal,
+        onDelta: (delta) => {
+          if (requestId !== this.explanationRequestId) return;
+          text += delta;
+          this.explanations.set(scope.key, { status: "loading", text });
+          this.tui.requestRender();
+        },
+      })
+      .then((finalText) => {
+        if (requestId !== this.explanationRequestId) return;
+        this.explanations.set(scope.key, {
+          status: "ready",
+          text: finalText.trim() || text.trim() || "No explanation returned.",
+        });
+      })
+      .catch((error) => {
+        if (requestId !== this.explanationRequestId) return;
+        if (controller.signal.aborted) return;
+        this.explanations.set(scope.key, {
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        if (requestId !== this.explanationRequestId) return;
+        this.stopLoadingTimerIfIdle();
+        this.tui.requestRender();
+      });
+
+    this.tui.requestRender();
+  }
+
+  private getCurrentHunkScope(): ExplanationScope | undefined {
+    const selectedLine = this.lines[this.selected];
+    if (!selectedLine?.filePath || !selectedLine.hunkLabel) return undefined;
+
+    let start = this.selected;
+    while (
+      start > 0 &&
+      this.lines[start - 1]?.filePath === selectedLine.filePath &&
+      this.lines[start - 1]?.hunkLabel === selectedLine.hunkLabel
+    ) {
+      start--;
+    }
+
+    let end = this.selected;
+    while (
+      end + 1 < this.lines.length &&
+      this.lines[end + 1]?.filePath === selectedLine.filePath &&
+      this.lines[end + 1]?.hunkLabel === selectedLine.hunkLabel
+    ) {
+      end++;
+    }
+
+    const diffText = this.lines
+      .slice(start, end + 1)
+      .map((line) => line.text)
+      .join("\n");
+    return {
+      key: `hunk:${selectedLine.filePath}:${selectedLine.hunkLabel}:${start}:${end}`,
+      kind: "hunk",
+      title: `${selectedLine.filePath} ${selectedLine.hunkLabel}`,
+      filePath: selectedLine.filePath,
+      diffText,
+    };
+  }
+
+  private getLoadingFrame(): string {
+    const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    return frames[this.loadingFrame % frames.length] ?? "⠋";
+  }
+
+  private startLoadingTimer(): void {
+    if (this.loadingTimer) return;
+    this.loadingTimer = setInterval(() => {
+      this.loadingFrame++;
+      this.tui.requestRender();
+    }, 120);
+  }
+
+  private stopLoadingTimerIfIdle(): void {
+    const hasLoading = [...this.explanations.values()].some(
+      (explanation) => explanation.status === "loading",
+    );
+    if (!hasLoading) this.stopLoadingTimer();
+  }
+
+  private stopLoadingTimer(): void {
+    if (!this.loadingTimer) return;
+    clearInterval(this.loadingTimer);
+    this.loadingTimer = undefined;
   }
 }

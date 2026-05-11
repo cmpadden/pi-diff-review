@@ -28,6 +28,7 @@ pi install https://github.com/cmpadden/pi-diff-review
 - `g/G` to jump to the top or bottom of the diff
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
 - `t` toggles the diff between unified and side-by-side split rendering
+- `?` toggles an AI-generated explanation for the current hunk
 - `J/K` to extend a highlighted selection into a comment range
 - `esc` clears the active selection, or exits review when no selection is active
 - `n/p` to jump hunks

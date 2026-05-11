@@ -4,6 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getDiff, parseDiffSource } from "./diff-source.ts";
 import { parseDiff } from "./diff-parser.ts";
+import { PiModelDiffExplainer } from "./explain.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { ReviewComponent } from "./review-component.ts";
 import type { DiffSource, ReviewComment, ReviewResult } from "./types.ts";
@@ -39,6 +40,7 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
             reviewLines,
             comments,
             done,
+            new PiModelDiffExplainer(ctx),
           );
         },
       );
