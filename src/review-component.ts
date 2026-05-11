@@ -67,6 +67,7 @@ export class ReviewComponent {
     private comments: Map<string, ReviewComment>,
     private done: (result: ReviewResult) => void,
     private explainer?: DiffExplainer,
+    private onCommentsChanged?: (comments: Map<string, ReviewComment>) => void,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.selected = firstCommentable >= 0 ? firstCommentable : 0;
@@ -508,6 +509,7 @@ export class ReviewComponent {
 
   private markCommentsChanged(): void {
     this.commentsRevision++;
+    this.onCommentsChanged?.(this.comments);
   }
 
   private ensureCommentLineKeys(): void {

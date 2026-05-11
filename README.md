@@ -36,6 +36,7 @@ pi install https://github.com/cmpadden/pi-diff-review
 - `C` to add or edit an overall diff comment
 - `x` to delete a comment for the current line or selected range
 - `Enter` to submit comments back to pi
+- Comments are cached per session and restored when reopening the same diff
 - `q` to exit
 
 ## Release
