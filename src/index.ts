@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -8,6 +9,67 @@ import { PiModelDiffExplainer } from "./explain.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { ReviewComponent } from "./review-component.ts";
 import type { DiffSource, ReviewComment, ReviewResult } from "./types.ts";
+
+const DIFF_REVIEW_CACHE_ENTRY = "pi-diff-review-cache";
+
+type DiffReviewCacheEntry = {
+  cacheKey: string;
+  comments: ReviewComment[];
+  updatedAt: number;
+};
+
+function getDiffCacheKey(
+  cwd: string,
+  source: DiffSource,
+  diffText: string,
+): string {
+  const hash = createHash("sha256").update(diffText).digest("hex");
+  return `${cwd}\0${source.label}\0${hash}`;
+}
+
+function getCachedComments(
+  ctx: ExtensionCommandContext,
+  cacheKey: string,
+): Map<string, ReviewComment> {
+  let latest: DiffReviewCacheEntry | undefined;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== DIFF_REVIEW_CACHE_ENTRY
+    ) {
+      continue;
+    }
+
+    const data = entry.data as Partial<DiffReviewCacheEntry> | undefined;
+    if (data?.cacheKey !== cacheKey || !Array.isArray(data.comments)) {
+      continue;
+    }
+
+    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
+      latest = {
+        cacheKey: data.cacheKey,
+        comments: data.comments,
+        updatedAt: data.updatedAt ?? 0,
+      };
+    }
+  }
+
+  return new Map(
+    (latest?.comments ?? []).map((comment) => [comment.id, comment]),
+  );
+}
+
+function persistCachedComments(
+  pi: ExtensionAPI,
+  cacheKey: string,
+  comments: Iterable<ReviewComment>,
+): void {
+  pi.appendEntry(DIFF_REVIEW_CACHE_ENTRY, {
+    cacheKey,
+    comments: [...comments],
+    updatedAt: Date.now(),
+  } satisfies DiffReviewCacheEntry);
+}
 
 export function registerDiffReviewCommand(pi: ExtensionAPI): void {
   pi.registerCommand("diff", {
@@ -30,9 +92,17 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
       }
 
       const reviewLines = parseDiff(diffText);
+      const cacheKey = getDiffCacheKey(ctx.cwd, source, diffText);
+      const comments = getCachedComments(ctx, cacheKey);
+      if (comments.size > 0) {
+        ctx.ui.notify(
+          `Restored ${comments.size} cached diff comment${comments.size === 1 ? "" : "s"}.`,
+          "info",
+        );
+      }
+
       const result = await ctx.ui.custom<ReviewResult>(
         (tui, theme, _keybindings, done) => {
-          const comments = new Map<string, ReviewComment>();
           return new ReviewComponent(
             tui,
             theme,
@@ -41,6 +111,9 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
             comments,
             done,
             new PiModelDiffExplainer(ctx),
+            (updatedComments) => {
+              persistCachedComments(pi, cacheKey, updatedComments.values());
+            },
           );
         },
       );
@@ -48,9 +121,11 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
       if (!result || result.action !== "submit") return;
       if (result.comments.length === 0) {
         ctx.ui.notify("No review comments to send.", "info");
+        persistCachedComments(pi, cacheKey, []);
         return;
       }
 
+      persistCachedComments(pi, cacheKey, []);
       pi.sendUserMessage(
         buildReviewPrompt(result.comments, source.promptLabel),
       );
