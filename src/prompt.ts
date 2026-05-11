@@ -18,6 +18,8 @@ export function formatLocation(line: {
 }
 
 function formatCommentLocation(comment: ReviewComment): string {
+  if (comment.global) return "Overall diff";
+
   const start = formatLocation({
     filePath: comment.filePath,
     oldLineNumber: comment.startOldLineNumber,

@@ -35,6 +35,8 @@ function lineNumberCell(value?: number): string {
   return value == null ? "    " : String(value).padStart(4, " ");
 }
 
+const GLOBAL_COMMENT_KEY = "__global_diff_comment__";
+
 export class ReviewComponent {
   private selected = 0;
   private scrollTop = 0;
@@ -82,13 +84,28 @@ export class ReviewComponent {
     });
 
     this.editor.onSubmit = (value) => {
+      const trimmed = value.trim();
+      if (this.editingCommentKey === GLOBAL_COMMENT_KEY) {
+        if (!trimmed) {
+          if (this.comments.delete(GLOBAL_COMMENT_KEY))
+            this.markCommentsChanged();
+        } else {
+          this.comments.set(
+            GLOBAL_COMMENT_KEY,
+            this.buildGlobalComment(trimmed),
+          );
+          this.markCommentsChanged();
+        }
+        this.exitEditMode();
+        return;
+      }
+
       const selection = this.getActiveCommentSelection();
       if (!selection) {
         this.exitEditMode();
         return;
       }
 
-      const trimmed = value.trim();
       const key = this.getSelectionKey(selection.start, selection.end);
       if (!trimmed) {
         if (this.comments.delete(key)) this.markCommentsChanged();
@@ -183,6 +200,10 @@ export class ReviewComponent {
       this.startEditMode();
       return;
     }
+    if (data === "C") {
+      this.startGlobalEditMode();
+      return;
+    }
     if (matchesKey(data, "enter")) {
       const comments = [...this.comments.values()].sort((a, b) =>
         a.id.localeCompare(b.id),
@@ -204,8 +225,8 @@ export class ReviewComponent {
           this.editMode
             ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
-              ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • Enter submit`
-              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • j/k move • g/G top/bottom • ctrl-u/d page • t unified/split • ? explain • J/K extend • c comment • x delete • n/p hunk • Enter submit • q quit`,
+              ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • C overall comment • Enter submit`
+              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • j/k move • g/G top/bottom • ctrl-u/d page • t unified/split • ? explain • J/K extend • c comment • C overall • x delete • n/p hunk • Enter submit • q quit`,
         ),
         width,
       ),
@@ -512,6 +533,18 @@ export class ReviewComponent {
     this.commentLineKeysRevision = this.commentsRevision;
   }
 
+  private buildGlobalComment(text: string): ReviewComment {
+    return {
+      id: GLOBAL_COMMENT_KEY,
+      filePath: "Overall diff",
+      text,
+      global: true,
+      startLineId: GLOBAL_COMMENT_KEY,
+      endLineId: GLOBAL_COMMENT_KEY,
+      lineText: "",
+    };
+  }
+
   private buildCommentFromSelection(
     selection: SelectionBounds,
     text: string,
@@ -577,6 +610,15 @@ export class ReviewComponent {
     this.tui.requestRender();
   }
 
+  private startGlobalEditMode(): void {
+    const existing = this.comments.get(GLOBAL_COMMENT_KEY);
+    this.rightPaneMode = "comments";
+    this.editMode = true;
+    this.editingCommentKey = GLOBAL_COMMENT_KEY;
+    this.editor.setText(existing?.text ?? "");
+    this.tui.requestRender(true);
+  }
+
   private startEditMode(): void {
     const selection = this.getActiveCommentSelection();
     if (!selection) return;
@@ -586,6 +628,7 @@ export class ReviewComponent {
     if (startLine.filePath !== endLine.filePath) return;
 
     const existing = this.getCommentForSelection(selection);
+    this.rightPaneMode = "comments";
     this.editMode = true;
     this.editingCommentKey = this.getSelectionKey(
       selection.start,
@@ -809,6 +852,42 @@ export class ReviewComponent {
     );
     lines.push("");
 
+    if (this.editMode && this.editingCommentKey === GLOBAL_COMMENT_KEY) {
+      lines[1] = truncateToWidth(
+        this.theme.fg("dim", "Overall diff comment"),
+        width,
+      );
+      lines.push(
+        ...wrapTextWithAnsi(
+          this.theme.fg(
+            "dim",
+            "Editing overall diff comment. Enter saves. Esc or Ctrl+C cancels.",
+          ),
+          width,
+        ),
+      );
+      lines.push("");
+      for (const line of this.editor.render(Math.max(10, width))) {
+        lines.push(truncateToWidth(line, width));
+      }
+      return lines.slice(0, height);
+    }
+
+    const globalComment = this.comments.get(GLOBAL_COMMENT_KEY);
+    if (globalComment) {
+      lines.push(
+        truncateToWidth(
+          this.theme.fg("accent", this.theme.bold("Overall diff comment")),
+          width,
+        ),
+      );
+      lines.push(
+        ...wrapTextWithAnsi(this.theme.fg("text", globalComment.text), width),
+      );
+      lines.push(...wrapTextWithAnsi(this.theme.fg("dim", "C edits"), width));
+      lines.push("");
+    }
+
     if (!selectedLine) {
       lines.push(
         ...wrapTextWithAnsi(
@@ -824,7 +903,7 @@ export class ReviewComponent {
         ...wrapTextWithAnsi(
           this.theme.fg(
             "muted",
-            "Move to a diff line and press c to add a comment.",
+            "Move to a diff line and press c to add a comment, or press C for an overall diff comment.",
           ),
           width,
         ),
@@ -889,8 +968,8 @@ export class ReviewComponent {
           this.theme.fg(
             "dim",
             this.hasSelection()
-              ? "Press c to add a range comment."
-              : "Press c to add one. Use J/K to extend a range.",
+              ? "Press c to add a range comment, or C for an overall diff comment."
+              : "Press c to add one. Use J/K to extend a range. Press C for an overall diff comment.",
           ),
           width,
         ),

@@ -6,6 +6,7 @@ export type ReviewComment = {
   id: string;
   filePath: string;
   text: string;
+  global?: boolean;
   startLineId: string;
   endLineId: string;
   startOldLineNumber?: number;

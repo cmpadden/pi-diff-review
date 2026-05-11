@@ -33,6 +33,7 @@ pi install https://github.com/cmpadden/pi-diff-review
 - `esc` clears the active selection, or exits review when no selection is active
 - `n/p` to jump hunks
 - `c` to add or edit a comment for the current line or selected range
+- `C` to add or edit an overall diff comment
 - `x` to delete a comment for the current line or selected range
 - `Enter` to submit comments back to pi
 - `q` to exit
