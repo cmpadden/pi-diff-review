@@ -1,6 +1,6 @@
 {
   "name": "pi-diff-review",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Local diff review TUI extension for pi",
   "license": "MIT",
   "repository": {
