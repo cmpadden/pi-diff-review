@@ -18,7 +18,6 @@ import { formatLocation } from "./prompt.ts";
 import type {
   DiffRenderMode,
   ReviewComment,
-  ReviewLayout,
   ReviewLine,
   ReviewResult,
   ReviewTheme,
@@ -47,8 +46,8 @@ export class ReviewComponent {
   private editMode = false;
   private editingCommentKey?: string;
   private selectionAnchor?: number;
-  private layout: ReviewLayout = "side-by-side";
   private diffRenderMode: DiffRenderMode = "unified";
+  private showRightPane = true;
   private rightPaneMode: RightPaneMode = "comments";
   private explanations = new Map<string, ExplanationState>();
   private explanationAbort?: AbortController;
@@ -151,6 +150,10 @@ export class ReviewComponent {
       return;
     }
     if (data === "t") {
+      this.toggleRightPane();
+      return;
+    }
+    if (data === "v") {
       this.toggleDiffRenderMode();
       return;
     }
@@ -232,22 +235,18 @@ export class ReviewComponent {
             ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
               ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • C overall comment • Enter submit`
-              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • j/k move • g/G top/bottom • ctrl-u/d page • t unified/split • ? explain • J/K extend • c comment • C overall • x delete • n/p hunk • Enter submit • q quit`,
+              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • ${this.showRightPane ? "sidebar shown" : "sidebar hidden"} • j/k move • g/G top/bottom • ctrl-u/d page • t sidebar • v unified/split • ? explain • J/K extend • c comment • C overall • x delete • n/p hunk • Enter submit • q quit`,
         ),
         width,
       ),
     );
-    if (this.layout === "side-by-side") {
+    if (!this.showRightPane) {
+      this.ensureScroll(viewportHeight);
+      output.push(...this.renderFullWidthDiffRows(width, viewportHeight));
+    } else {
       this.ensureScroll(viewportHeight);
       output.push(
         ...this.renderSideBySide(width, viewportHeight, selectedLine),
-      );
-    } else {
-      const { diffHeight, commentsHeight } =
-        this.getStackedHeights(viewportHeight);
-      this.ensureScroll(diffHeight);
-      output.push(
-        ...this.renderStacked(width, diffHeight, commentsHeight, selectedLine),
       );
     }
 
@@ -282,26 +281,16 @@ export class ReviewComponent {
     return output;
   }
 
-  private renderStacked(
-    width: number,
-    diffHeight: number,
-    commentsHeight: number,
-    selectedLine?: ReviewLine,
-  ): string[] {
-    const comments = this.renderRightPane(width, commentsHeight, selectedLine);
-    return [
-      ...this.renderDiffRows(width, diffHeight),
-      this.theme.fg("borderMuted", "─".repeat(width)),
-      ...Array.from({ length: commentsHeight }, (_, index) =>
-        padToWidth(truncateToWidth(comments[index] ?? "", width), width),
-      ),
-    ];
-  }
-
   private renderDiffRows(width: number, height: number): string[] {
     return this.diffRenderMode === "split"
       ? this.renderSplitDiffRows(width, height)
       : this.renderUnifiedDiffRows(width, height);
+  }
+
+  private renderFullWidthDiffRows(width: number, height: number): string[] {
+    return this.renderDiffRows(width, height).map((row) =>
+      padToWidth(truncateToWidth(row, width), width),
+    );
   }
 
   private renderUnifiedDiffRows(width: number, height: number): string[] {
@@ -378,22 +367,6 @@ export class ReviewComponent {
     return Math.max(6, terminalRows - headerHeight - footerHeight);
   }
 
-  private getStackedHeights(viewportHeight: number): {
-    diffHeight: number;
-    commentsHeight: number;
-  } {
-    const availableForPanes = Math.max(2, viewportHeight - 1);
-    let diffHeight = Math.max(1, Math.floor(availableForPanes * 0.6));
-    let commentsHeight = availableForPanes - diffHeight;
-
-    if (commentsHeight < 3 && availableForPanes >= 4) {
-      commentsHeight = 3;
-      diffHeight = availableForPanes - commentsHeight;
-    }
-
-    return { diffHeight, commentsHeight };
-  }
-
   invalidate(): void {
     this.highlightedLineCache.clear();
   }
@@ -425,11 +398,6 @@ export class ReviewComponent {
     }
   }
 
-  private toggleLayout(): void {
-    this.layout = this.layout === "side-by-side" ? "stacked" : "side-by-side";
-    this.tui.requestRender(true);
-  }
-
   private toggleDiffRenderMode(): void {
     this.diffRenderMode =
       this.diffRenderMode === "unified" ? "split" : "unified";
@@ -437,7 +405,18 @@ export class ReviewComponent {
     this.tui.requestRender(true);
   }
 
+  private toggleRightPane(): void {
+    this.showRightPane = !this.showRightPane;
+    this.tui.requestRender(true);
+  }
+
+  private showCommentsPane(): void {
+    this.showRightPane = true;
+    this.rightPaneMode = "comments";
+  }
+
   private toggleExplanationPane(): void {
+    this.showRightPane = true;
     this.rightPaneMode =
       this.rightPaneMode === "comments" ? "explanation" : "comments";
     if (this.rightPaneMode === "explanation") {
@@ -448,11 +427,7 @@ export class ReviewComponent {
 
   private getPageMoveAmount(): number {
     const contentHeight = this.getContentHeight();
-    const diffHeight =
-      this.layout === "stacked"
-        ? this.getStackedHeights(contentHeight).diffHeight
-        : contentHeight;
-    return Math.max(1, Math.floor(diffHeight / 2));
+    return Math.max(1, Math.floor(contentHeight / 2));
   }
 
   private extendSelection(delta: number): void {
@@ -621,7 +596,7 @@ export class ReviewComponent {
 
   private startGlobalEditMode(): void {
     const existing = this.comments.get(GLOBAL_COMMENT_KEY);
-    this.rightPaneMode = "comments";
+    this.showCommentsPane();
     this.editMode = true;
     this.editingCommentKey = GLOBAL_COMMENT_KEY;
     this.editor.setText(existing?.text ?? "");
@@ -637,7 +612,7 @@ export class ReviewComponent {
     if (startLine.filePath !== endLine.filePath) return;
 
     const existing = this.getCommentForSelection(selection);
-    this.rightPaneMode = "comments";
+    this.showCommentsPane();
     this.editMode = true;
     this.editingCommentKey = this.getSelectionKey(
       selection.start,

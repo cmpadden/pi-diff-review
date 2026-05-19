@@ -42,7 +42,6 @@ export type DiffSource = {
   args: string[];
 };
 
-export type ReviewLayout = "side-by-side" | "stacked";
 export type DiffRenderMode = "unified" | "split";
 
 export type SplitDiffCell = {
