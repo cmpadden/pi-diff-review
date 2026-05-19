@@ -27,10 +27,41 @@ git clone https://github.com/cmpadden/pi-diff-review
 pi install ./pi-diff-review
 ```
 
+## Usage
+
+Start a review with `/diff`. By default, this reviews your current unstaged changes:
+
+```text
+/diff
+```
+
+Review staged changes with `--cached`:
+
+```text
+/diff --cached
+```
+
+Review a branch or commit range by passing any `git diff` arguments after `/diff`:
+
+```text
+/diff main...HEAD
+```
+
+`/diff <git-diff-args>` is passed through to `git diff`, so these examples are equivalent to running `git diff`, `git diff --cached`, and `git diff main...HEAD` locally before opening the review UI.
+
+### Staged vs. unstaged changes
+
+- `/diff` shows unstaged working-tree changes only.
+- `/diff --cached` shows staged changes only.
+- If you have both staged and unstaged edits, run both commands separately to review each set.
+- To review everything relative to a base branch, use a range such as `/diff main...HEAD`.
+
 ## Features
 
 - `/diff` reviews the current unstaged `git diff`
-- `/diff <git-diff-args>` passes arguments through to `git diff` (for example `/diff main...HEAD`)
+- `/diff --cached` reviews staged changes
+- `/diff main...HEAD` reviews changes on the current branch relative to `main`
+- `/diff <git-diff-args>` passes arguments through to `git diff`
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff
 - `ctrl-u` / `ctrl-d` to move up/down by half a page

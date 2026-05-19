@@ -32,10 +32,10 @@
 
 ## Follow-up improvements
 
-- [ ] Expand README usage examples
-  - [ ] `/diff --cached`
-  - [ ] `/diff main...HEAD`
-  - [ ] staged vs unstaged review notes
+- [x] Expand README usage examples
+  - [x] `/diff --cached`
+  - [x] `/diff main...HEAD`
+  - [x] staged vs unstaged review notes
 
 - [ ] Improve large-diff UX
   - [ ] Show file count/hunk count/line count before opening very large diffs
