@@ -17,7 +17,7 @@ export function formatLocation(line: {
   return file;
 }
 
-function formatCommentLocation(comment: ReviewComment): string {
+export function formatCommentLocation(comment: ReviewComment): string {
   if (comment.global) return "Overall diff";
 
   const start = formatLocation({
