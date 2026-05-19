@@ -21,6 +21,7 @@ import {
   getSelectionKey,
 } from "./comment-manager.ts";
 import { formatLocation } from "./prompt.ts";
+import { ReviewNavigationState } from "./review-navigation.ts";
 import { padToWidth, lineNumberCell } from "./render-utils.ts";
 import { buildSplitDiffRows } from "./split-diff.ts";
 import type {
@@ -37,12 +38,10 @@ import type {
 } from "./types.ts";
 
 export class ReviewComponent {
-  private selected = 0;
-  private scrollTop = 0;
+  private navigation: ReviewNavigationState;
   private editMode = false;
   private editingCommentKey?: string;
-  private selectionAnchor?: number;
-  private diffRenderMode: DiffRenderMode = "unified";
+
   private showRightPane = true;
   private rightPaneMode: RightPaneMode = "comments";
   private explanations = new Map<string, ExplanationState>();
@@ -70,7 +69,10 @@ export class ReviewComponent {
     private onCommentsChanged?: (comments: Map<string, ReviewComment>) => void,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
-    this.selected = firstCommentable >= 0 ? firstCommentable : 0;
+    this.navigation = new ReviewNavigationState(
+      this.lines.length,
+      firstCommentable >= 0 ? firstCommentable : 0,
+    );
     this.lines.forEach((line, index) => this.lineIndexById.set(line.id, index));
 
     this.editor = new Editor(tui as never, {
@@ -117,6 +119,26 @@ export class ReviewComponent {
 
       this.exitEditMode();
     };
+  }
+
+  private get selected(): number {
+    return this.navigation.selected;
+  }
+
+  private set selected(value: number) {
+    this.navigation.selected = value;
+  }
+
+  private get scrollTop(): number {
+    return this.navigation.scrollTop;
+  }
+
+  private set scrollTop(value: number) {
+    this.navigation.scrollTop = value;
+  }
+
+  private get diffRenderMode(): DiffRenderMode {
+    return this.navigation.diffRenderMode;
   }
 
   handleInput(data: string): void {
@@ -370,31 +392,18 @@ export class ReviewComponent {
   }
 
   private move(delta: number): void {
-    const next = Math.max(
-      0,
-      Math.min(this.lines.length - 1, this.selected + delta),
-    );
-    if (next === this.selected) return;
-    this.selected = next;
+    if (!this.navigation.move(delta)) return;
     this.tui.requestRender();
   }
 
   private jumpToBoundary(boundary: "start" | "end"): void {
-    const next = boundary === "start" ? 0 : Math.max(0, this.lines.length - 1);
-    const hadSelection = this.selectionAnchor != null;
-    if (next === this.selected && !hadSelection) return;
-    this.selected = next;
-    if (hadSelection) {
-      this.clearSelection();
-    } else {
-      this.tui.requestRender();
-    }
+    const result = this.navigation.jumpToBoundary(boundary);
+    if (!result.changed) return;
+    this.tui.requestRender();
   }
 
   private toggleDiffRenderMode(): void {
-    this.diffRenderMode =
-      this.diffRenderMode === "unified" ? "split" : "unified";
-    this.scrollTop = 0;
+    this.navigation.toggleDiffRenderMode();
     this.tui.requestRender(true);
   }
 
@@ -424,36 +433,21 @@ export class ReviewComponent {
   }
 
   private extendSelection(delta: number): void {
-    if (this.selectionAnchor == null) {
-      this.selectionAnchor = this.selected;
-    }
-    const next = Math.max(
-      0,
-      Math.min(this.lines.length - 1, this.selected + delta),
-    );
-    if (next === this.selected) return;
-    this.selected = next;
+    if (!this.navigation.extendSelection(delta)) return;
     this.tui.requestRender();
   }
 
   private clearSelection(): void {
-    if (this.selectionAnchor == null) return;
-    this.selectionAnchor = undefined;
+    if (!this.navigation.clearSelection()) return;
     this.tui.requestRender();
   }
 
   private hasSelection(): boolean {
-    return (
-      this.selectionAnchor != null && this.selectionAnchor !== this.selected
-    );
+    return this.navigation.hasSelection();
   }
 
   private getSelectionBounds(): SelectionBounds | undefined {
-    if (this.selectionAnchor == null) return undefined;
-    return {
-      start: Math.min(this.selectionAnchor, this.selected),
-      end: Math.max(this.selectionAnchor, this.selected),
-    };
+    return this.navigation.getSelectionBounds();
   }
 
   private getActiveCommentSelection(): SelectionBounds | undefined {
@@ -618,18 +612,10 @@ export class ReviewComponent {
   }
 
   private ensureScroll(viewportHeight: number): void {
-    const selectedRow = this.getSelectedDisplayRow();
-    const rowCount = this.getDisplayRowCount();
-
-    if (selectedRow < this.scrollTop) {
-      this.scrollTop = selectedRow;
-    }
-    if (selectedRow >= this.scrollTop + viewportHeight) {
-      this.scrollTop = selectedRow - viewportHeight + 1;
-    }
-    this.scrollTop = Math.max(
-      0,
-      Math.min(this.scrollTop, Math.max(0, rowCount - viewportHeight)),
+    this.navigation.ensureScroll(
+      viewportHeight,
+      this.getSelectedDisplayRow(),
+      this.getDisplayRowCount(),
     );
   }
 
