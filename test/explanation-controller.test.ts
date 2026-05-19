@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getCurrentHunkScope } from "../src/explanation-controller.ts";
+import {
+  ExplanationController,
+  getCurrentHunkScope,
+} from "../src/explanation-controller.ts";
+import type { DiffExplainer, ExplanationScope } from "../src/explain.ts";
 import type { ReviewLine } from "../src/types.ts";
 
 function line(
@@ -47,5 +51,56 @@ describe("getCurrentHunkScope", () => {
       ),
       undefined,
     );
+  });
+});
+
+describe("ExplanationController", () => {
+  const scope: ExplanationScope = {
+    key: "hunk:src/app.ts:@@ -1 +1 @@:0:1",
+    kind: "hunk",
+    title: "src/app.ts @@ -1 +1 @@",
+    filePath: "src/app.ts",
+    diffText: "-old\n+new",
+  };
+
+  it("restores ready explanations from cache", () => {
+    const controller = new ExplanationController(
+      { requestRender: () => undefined },
+      undefined,
+      new Map([[scope.key, "cached explanation"]]),
+    );
+
+    assert.deepEqual(controller.getState(scope), {
+      status: "ready",
+      text: "cached explanation",
+    });
+  });
+
+  it("emits ready explanations after generation finishes", async () => {
+    let changed: Map<string, string> | undefined;
+    const explainer: DiffExplainer = {
+      async explain(_scope, options) {
+        options?.onDelta?.("partial ");
+        return "final explanation";
+      },
+    };
+    const controller = new ExplanationController(
+      { requestRender: () => undefined },
+      explainer,
+      new Map(),
+      (explanations) => {
+        changed = explanations;
+      },
+    );
+
+    controller.ensure(scope);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(controller.getState(scope), {
+      status: "ready",
+      text: "final explanation",
+    });
+    assert.equal(changed?.get(scope.key), "final explanation");
+    controller.dispose();
   });
 });

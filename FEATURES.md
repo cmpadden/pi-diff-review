@@ -42,9 +42,9 @@
   - [ ] Add confirmation above a configurable threshold
   - [ ] Consider filtering by file or hunk
 
-- [ ] Cache AI explanations per diff/session
-  - [ ] Reuse generated hunk explanations when reopening the same diff
-  - [ ] Clear explanation cache when the diff changes
+- [x] Cache AI explanations per diff/session
+  - [x] Reuse generated hunk explanations when reopening the same diff
+  - [x] Clear explanation cache when the diff changes
 
 - [ ] Document compatibility expectations
   - [ ] Note that the package ships raw `.ts` extension files

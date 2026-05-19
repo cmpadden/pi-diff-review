@@ -11,10 +11,17 @@ import { ReviewComponent } from "./review-component.ts";
 import type { DiffSource, ReviewComment, ReviewResult } from "./types.ts";
 
 const DIFF_REVIEW_CACHE_ENTRY = "pi-diff-review-cache";
+const DIFF_REVIEW_EXPLANATION_CACHE_ENTRY = "pi-diff-review-explanation-cache";
 
 type DiffReviewCacheEntry = {
   cacheKey: string;
   comments: ReviewComment[];
+  updatedAt: number;
+};
+
+type DiffExplanationCacheEntry = {
+  cacheKey: string;
+  explanations: Record<string, string>;
   updatedAt: number;
 };
 
@@ -71,6 +78,58 @@ function persistCachedComments(
   } satisfies DiffReviewCacheEntry);
 }
 
+function getCachedExplanations(
+  ctx: ExtensionCommandContext,
+  cacheKey: string,
+): Map<string, string> {
+  let latest: DiffExplanationCacheEntry | undefined;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== DIFF_REVIEW_EXPLANATION_CACHE_ENTRY
+    ) {
+      continue;
+    }
+
+    const data = entry.data as Partial<DiffExplanationCacheEntry> | undefined;
+    if (
+      data?.cacheKey !== cacheKey ||
+      !data.explanations ||
+      typeof data.explanations !== "object" ||
+      Array.isArray(data.explanations)
+    ) {
+      continue;
+    }
+
+    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
+      latest = {
+        cacheKey: data.cacheKey,
+        explanations: Object.fromEntries(
+          Object.entries(data.explanations).filter(
+            (entry): entry is [string, string] =>
+              typeof entry[0] === "string" && typeof entry[1] === "string",
+          ),
+        ),
+        updatedAt: data.updatedAt ?? 0,
+      };
+    }
+  }
+
+  return new Map(Object.entries(latest?.explanations ?? {}));
+}
+
+function persistCachedExplanations(
+  pi: ExtensionAPI,
+  cacheKey: string,
+  explanations: Map<string, string>,
+): void {
+  pi.appendEntry(DIFF_REVIEW_EXPLANATION_CACHE_ENTRY, {
+    cacheKey,
+    explanations: Object.fromEntries(explanations),
+    updatedAt: Date.now(),
+  } satisfies DiffExplanationCacheEntry);
+}
+
 export function registerDiffReviewCommand(pi: ExtensionAPI): void {
   pi.registerCommand("diff", {
     description: "Review a git diff in a custom TUI (/diff [git diff args])",
@@ -94,9 +153,16 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
       const reviewLines = parseDiff(diffText);
       const cacheKey = getDiffCacheKey(ctx.cwd, source, diffText);
       const comments = getCachedComments(ctx, cacheKey);
+      const explanations = getCachedExplanations(ctx, cacheKey);
       if (comments.size > 0) {
         ctx.ui.notify(
           `Restored ${comments.size} cached diff comment${comments.size === 1 ? "" : "s"}.`,
+          "info",
+        );
+      }
+      if (explanations.size > 0) {
+        ctx.ui.notify(
+          `Restored ${explanations.size} cached hunk explanation${explanations.size === 1 ? "" : "s"}.`,
           "info",
         );
       }
@@ -113,6 +179,10 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
             new PiModelDiffExplainer(ctx),
             (updatedComments) => {
               persistCachedComments(pi, cacheKey, updatedComments.values());
+            },
+            explanations,
+            (updatedExplanations) => {
+              persistCachedExplanations(pi, cacheKey, updatedExplanations);
             },
           );
         },

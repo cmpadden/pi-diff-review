@@ -55,7 +55,17 @@ export class ExplanationController {
   constructor(
     private readonly tui: ReviewTui,
     private readonly explainer?: DiffExplainer,
-  ) {}
+    cachedExplanations: Map<string, string> = new Map(),
+    private readonly onExplanationsChanged?: (
+      explanations: Map<string, string>,
+    ) => void,
+  ) {
+    for (const [key, text] of cachedExplanations) {
+      const trimmed = text.trim();
+      if (trimmed)
+        this.explanations.set(key, { status: "ready", text: trimmed });
+    }
+  }
 
   get isAvailable(): boolean {
     return this.explainer != null;
@@ -98,6 +108,7 @@ export class ExplanationController {
           status: "ready",
           text: finalText.trim() || text.trim() || "No explanation returned.",
         });
+        this.emitExplanationsChanged();
       })
       .catch((error) => {
         if (requestId !== this.requestId) return;
@@ -119,6 +130,18 @@ export class ExplanationController {
   dispose(): void {
     this.abortController?.abort();
     this.stopLoadingTimer();
+  }
+
+  private emitExplanationsChanged(): void {
+    if (!this.onExplanationsChanged) return;
+
+    const readyExplanations = new Map<string, string>();
+    for (const [key, explanation] of this.explanations) {
+      if (explanation.status === "ready") {
+        readyExplanations.set(key, explanation.text);
+      }
+    }
+    this.onExplanationsChanged(readyExplanations);
   }
 
   private startLoadingTimer(): void {
