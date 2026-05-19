@@ -3,6 +3,7 @@
   "version": "0.1.11",
   "description": "Local diff review TUI extension for pi",
   "license": "MIT",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cmpadden/pi-diff-review.git"
@@ -26,10 +27,18 @@
     "LICENSE"
   ],
   "scripts": {
-    "format": "prettier --write ."
+    "check": "npm run typecheck && npm test",
+    "format": "prettier --write .",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "prettier": "^3.5.3"
+    "@earendil-works/pi-coding-agent": "^0.74.1",
+    "@earendil-works/pi-tui": "^0.74.1",
+    "@types/node": "^24.12.4",
+    "prettier": "^3.5.3",
+    "tsx": "^4.22.1",
+    "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
