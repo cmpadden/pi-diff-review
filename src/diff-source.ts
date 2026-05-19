@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import type { DiffSource } from "./types.ts";
 
 export function parseDiffSource(args: string): DiffSource {
@@ -64,14 +64,40 @@ function tokenizeDiffArgs(input: string): string[] {
   return args;
 }
 
+export const DIFF_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
+
 export function getDiff(cwd: string, source: DiffSource): string {
-  return execFileSync(
-    "git",
-    ["diff", "--no-color", "--unified=3", ...source.args],
-    {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
+  const args = ["diff", "--no-color", "--unified=3", ...source.args];
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: DIFF_MAX_BUFFER_BYTES,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.error) {
+    throw new Error(formatSpawnError(result.error));
+  }
+
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    throw new Error(
+      stderr || `git ${args.join(" ")} exited with status ${result.status}.`,
+    );
+  }
+
+  return result.stdout;
+}
+
+function formatSpawnError(error: Error & { code?: string }): string {
+  if (error.code === "ENOBUFS") {
+    return `Diff output exceeded the ${formatBytes(DIFF_MAX_BUFFER_BYTES)} safety limit. Try reviewing a smaller diff or narrowing with git diff pathspecs.`;
+  }
+
+  return error.message;
+}
+
+function formatBytes(bytes: number): string {
+  const mib = bytes / 1024 / 1024;
+  return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
 }
