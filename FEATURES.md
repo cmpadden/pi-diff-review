@@ -16,8 +16,8 @@
 - [ ] Break up `src/review-component.ts`
   - [ ] Extract review/navigation state
   - [ ] Extract rendering helpers/panes
-  - [ ] Extract comment management
-  - [ ] Extract split-diff row generation
+  - [x] Extract comment management
+  - [x] Extract split-diff row generation
   - [ ] Extract explanation pane/streaming behavior
 
 - [ ] Improve comment range behavior

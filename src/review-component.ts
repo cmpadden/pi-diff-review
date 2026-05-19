@@ -6,7 +6,6 @@ import {
   Editor,
   matchesKey,
   truncateToWidth,
-  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type {
@@ -14,7 +13,16 @@ import type {
   ExplanationScope,
   ExplanationState,
 } from "./explain.ts";
+import {
+  GLOBAL_COMMENT_KEY,
+  buildCommentFromSelection,
+  buildCommentLineKeys,
+  buildGlobalComment,
+  getSelectionKey,
+} from "./comment-manager.ts";
 import { formatLocation } from "./prompt.ts";
+import { padToWidth, lineNumberCell } from "./render-utils.ts";
+import { buildSplitDiffRows } from "./split-diff.ts";
 import type {
   DiffRenderMode,
   ReviewComment,
@@ -27,18 +35,6 @@ import type {
   SplitDiffCell,
   SplitDiffRow,
 } from "./types.ts";
-
-function padToWidth(text: string, width: number): string {
-  const visible = visibleWidth(text);
-  if (visible >= width) return truncateToWidth(text, width);
-  return text + " ".repeat(width - visible);
-}
-
-function lineNumberCell(value?: number): string {
-  return value == null ? "    " : String(value).padStart(4, " ");
-}
-
-const GLOBAL_COMMENT_KEY = "__global_diff_comment__";
 
 export class ReviewComponent {
   private selected = 0;
@@ -95,10 +91,7 @@ export class ReviewComponent {
           if (this.comments.delete(GLOBAL_COMMENT_KEY))
             this.markCommentsChanged();
         } else {
-          this.comments.set(
-            GLOBAL_COMMENT_KEY,
-            this.buildGlobalComment(trimmed),
-          );
+          this.comments.set(GLOBAL_COMMENT_KEY, buildGlobalComment(trimmed));
           this.markCommentsChanged();
         }
         this.exitEditMode();
@@ -117,7 +110,7 @@ export class ReviewComponent {
       } else {
         this.comments.set(
           key,
-          this.buildCommentFromSelection(selection, trimmed),
+          buildCommentFromSelection(this.lines, selection, trimmed),
         );
         this.markCommentsChanged();
       }
@@ -472,7 +465,7 @@ export class ReviewComponent {
   }
 
   private getSelectionKey(start: number, end: number): string {
-    return `${this.lines[start]?.id ?? start}:${this.lines[end]?.id ?? end}`;
+    return getSelectionKey(this.lines, start, end);
   }
 
   private getCommentForSelection(
@@ -497,60 +490,11 @@ export class ReviewComponent {
   private ensureCommentLineKeys(): void {
     if (this.commentLineKeysRevision === this.commentsRevision) return;
 
-    this.commentLineKeys = new Map<number, string[]>();
-    for (const [key, comment] of this.comments) {
-      const start = this.lineIndexById.get(comment.startLineId);
-      const end = this.lineIndexById.get(comment.endLineId);
-      if (start == null || end == null) continue;
-      const from = Math.min(start, end);
-      const to = Math.max(start, end);
-      for (let index = from; index <= to; index++) {
-        const keys = this.commentLineKeys.get(index);
-        if (keys) {
-          keys.push(key);
-        } else {
-          this.commentLineKeys.set(index, [key]);
-        }
-      }
-    }
-
+    this.commentLineKeys = buildCommentLineKeys(
+      this.comments,
+      this.lineIndexById,
+    );
     this.commentLineKeysRevision = this.commentsRevision;
-  }
-
-  private buildGlobalComment(text: string): ReviewComment {
-    return {
-      id: GLOBAL_COMMENT_KEY,
-      filePath: "Overall diff",
-      text,
-      global: true,
-      startLineId: GLOBAL_COMMENT_KEY,
-      endLineId: GLOBAL_COMMENT_KEY,
-      lineText: "",
-    };
-  }
-
-  private buildCommentFromSelection(
-    selection: SelectionBounds,
-    text: string,
-  ): ReviewComment {
-    const startLine = this.lines[selection.start]!;
-    const endLine = this.lines[selection.end]!;
-    const excerpt = this.lines
-      .slice(selection.start, selection.end + 1)
-      .map((line) => line.text)
-      .join("\n");
-    return {
-      id: this.getSelectionKey(selection.start, selection.end),
-      filePath: startLine.filePath ?? endLine.filePath ?? "(unknown file)",
-      text,
-      startLineId: startLine.id,
-      endLineId: endLine.id,
-      startOldLineNumber: startLine.oldLineNumber,
-      startNewLineNumber: startLine.newLineNumber,
-      endOldLineNumber: endLine.oldLineNumber,
-      endNewLineNumber: endLine.newLineNumber,
-      lineText: excerpt,
-    };
   }
 
   private getPositionText(selectedLine?: ReviewLine): string {
@@ -632,57 +576,7 @@ export class ReviewComponent {
   private getSplitDiffRows(): SplitDiffRow[] {
     if (this.splitRows) return this.splitRows;
 
-    const rows: SplitDiffRow[] = [];
-    const rowByLineIndex: number[] = [];
-    let index = 0;
-
-    const pushRow = (row: SplitDiffRow) => {
-      const displayRow = rows.length;
-      rows.push(row);
-      if (row.kind === "full") {
-        rowByLineIndex[row.cell.index] = displayRow;
-      } else {
-        if (row.left) rowByLineIndex[row.left.index] = displayRow;
-        if (row.right) rowByLineIndex[row.right.index] = displayRow;
-      }
-    };
-
-    while (index < this.lines.length) {
-      const line = this.lines[index]!;
-
-      if (line.kind === "remove" || line.kind === "add") {
-        const removals: SplitDiffCell[] = [];
-        const additions: SplitDiffCell[] = [];
-
-        while (this.lines[index]?.kind === "remove") {
-          removals.push({ line: this.lines[index]!, index });
-          index++;
-        }
-        while (this.lines[index]?.kind === "add") {
-          additions.push({ line: this.lines[index]!, index });
-          index++;
-        }
-
-        const count = Math.max(removals.length, additions.length);
-        for (let offset = 0; offset < count; offset++) {
-          pushRow({
-            kind: "split",
-            left: removals[offset],
-            right: additions[offset],
-          });
-        }
-        continue;
-      }
-
-      if (line.kind === "context") {
-        const cell = { line, index };
-        pushRow({ kind: "split", left: cell, right: cell });
-      } else {
-        pushRow({ kind: "full", cell: { line, index } });
-      }
-      index++;
-    }
-
+    const { rows, rowByLineIndex } = buildSplitDiffRows(this.lines);
     this.splitRows = rows;
     this.splitRowByLineIndex = rowByLineIndex;
     return rows;
