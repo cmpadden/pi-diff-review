@@ -34,7 +34,8 @@ pi install ./pi-diff-review
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
-- `t` toggles the diff between unified and side-by-side split rendering
+- `t` toggles the comments/explanation sidebar
+- `v` toggles the diff between unified and side-by-side split rendering
 - `?` toggles an AI-generated explanation for the current hunk
 - `J/K` to extend a highlighted selection into a comment range
 - `esc` clears the active selection, or exits review when no selection is active
