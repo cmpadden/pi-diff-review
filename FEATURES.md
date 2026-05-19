@@ -8,10 +8,10 @@
   - [x] Add parser/tokenizer/prompt tests
   - [x] Update CI/release workflow to run typecheck and tests before packing/publishing
 
-- [ ] Fix large diff handling
-  - [ ] Replace `execFileSync` or configure a safe `maxBuffer`
-  - [ ] Return friendly errors for oversized diffs or git failures
-  - [ ] Consider streaming diff output for very large reviews
+- [x] Fix large diff handling
+  - [x] Replace `execFileSync` or configure a safe `maxBuffer`
+  - [x] Return friendly errors for oversized diffs or git failures
+  - [x] Consider streaming diff output for very large reviews
 
 - [ ] Break up `src/review-component.ts`
   - [ ] Extract review/navigation state
@@ -62,5 +62,5 @@
 - [x] Add unit tests for `parseDiff()`
 - [x] Add unit tests for `buildReviewPrompt()`
 - [ ] Add unit tests for range/comment key behavior
-- [ ] Fix large diff buffer handling
+- [x] Fix large diff buffer handling
 - [ ] Refactor `src/review-component.ts` with tests in place
