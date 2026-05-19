@@ -62,6 +62,8 @@ export class ReviewComponent {
     private done: (result: ReviewResult) => void,
     private explainer?: DiffExplainer,
     private onCommentsChanged?: (comments: Map<string, ReviewComment>) => void,
+    cachedExplanations?: Map<string, string>,
+    private onExplanationsChanged?: (explanations: Map<string, string>) => void,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.navigation = new ReviewNavigationState(
@@ -69,7 +71,12 @@ export class ReviewComponent {
       firstCommentable >= 0 ? firstCommentable : 0,
     );
     this.lines.forEach((line, index) => this.lineIndexById.set(line.id, index));
-    this.explanationController = new ExplanationController(tui, explainer);
+    this.explanationController = new ExplanationController(
+      tui,
+      explainer,
+      cachedExplanations,
+      onExplanationsChanged,
+    );
 
     this.editor = new Editor(tui as never, {
       borderColor: (s) => theme.fg("accent", s),
