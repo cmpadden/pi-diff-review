@@ -13,12 +13,12 @@
   - [x] Return friendly errors for oversized diffs or git failures
   - [x] Consider streaming diff output for very large reviews
 
-- [ ] Break up `src/review-component.ts`
+- [x] Break up `src/review-component.ts`
   - [x] Extract review/navigation state
-  - [ ] Extract rendering helpers/panes
+  - [x] Extract rendering helpers/panes
   - [x] Extract comment management
   - [x] Extract split-diff row generation
-  - [ ] Extract explanation pane/streaming behavior
+  - [x] Extract explanation pane/streaming behavior
 
 - [ ] Improve comment range behavior
   - [ ] Validate every selected line is commentable
