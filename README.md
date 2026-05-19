@@ -2,9 +2,9 @@
 
 # pi-diff-review
 
-Embedded code reviews directly directly within [pi](https://pi.dev/).
+Embedded code reviews and AI summaries directly within [pi](https://pi.dev/).
 
-<img width="1986" height="1556" alt="pi-diff-review-screenshot(1)" src="https://github.com/user-attachments/assets/3fd00163-5d19-489b-94ed-3d4816c6cad3" />
+<img width="1986" height="1556" alt="pi-diff-review-screenshot" src="https://github.com/user-attachments/assets/5ddd7226-28d4-4617-8c5c-35b4b6af68dc" />
 
 ## Install
 
