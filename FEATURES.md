@@ -14,7 +14,7 @@
   - [x] Consider streaming diff output for very large reviews
 
 - [ ] Break up `src/review-component.ts`
-  - [ ] Extract review/navigation state
+  - [x] Extract review/navigation state
   - [ ] Extract rendering helpers/panes
   - [x] Extract comment management
   - [x] Extract split-diff row generation
