@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: pi-diff-review-checks
+        name: pi-diff-review checks
+        entry: npm run precommit
+        language: system
+        pass_filenames: false

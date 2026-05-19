@@ -29,6 +29,7 @@
   "scripts": {
     "check": "npm run typecheck && npm test",
     "format": "prettier --write .",
+    "precommit": "npm run check && npx prettier --check .",
     "test": "node --import tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
