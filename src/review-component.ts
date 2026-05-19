@@ -2,17 +2,8 @@ import {
   getLanguageFromPath,
   highlightCode,
 } from "@earendil-works/pi-coding-agent";
-import {
-  Editor,
-  matchesKey,
-  truncateToWidth,
-  wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
-import type {
-  DiffExplainer,
-  ExplanationScope,
-  ExplanationState,
-} from "./explain.ts";
+import { Editor, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import type { DiffExplainer } from "./explain.ts";
 import {
   GLOBAL_COMMENT_KEY,
   buildCommentFromSelection,
@@ -20,8 +11,16 @@ import {
   buildGlobalComment,
   getSelectionKey,
 } from "./comment-manager.ts";
+import {
+  ExplanationController,
+  getCurrentHunkScope,
+} from "./explanation-controller.ts";
 import { formatLocation } from "./prompt.ts";
 import { ReviewNavigationState } from "./review-navigation.ts";
+import {
+  renderCommentsPane as renderCommentsPaneContent,
+  renderExplanationPane as renderExplanationPaneContent,
+} from "./review-panes.ts";
 import { padToWidth, lineNumberCell } from "./render-utils.ts";
 import { buildSplitDiffRows } from "./split-diff.ts";
 import type {
@@ -44,11 +43,7 @@ export class ReviewComponent {
 
   private showRightPane = true;
   private rightPaneMode: RightPaneMode = "comments";
-  private explanations = new Map<string, ExplanationState>();
-  private explanationAbort?: AbortController;
-  private explanationRequestId = 0;
-  private loadingFrame = 0;
-  private loadingTimer?: ReturnType<typeof setInterval>;
+  private explanationController: ExplanationController;
   private editor: Editor;
   private splitRows?: SplitDiffRow[];
   private splitRowByLineIndex?: number[];
@@ -74,6 +69,7 @@ export class ReviewComponent {
       firstCommentable >= 0 ? firstCommentable : 0,
     );
     this.lines.forEach((line, index) => this.lineIndexById.set(line.id, index));
+    this.explanationController = new ExplanationController(tui, explainer);
 
     this.editor = new Editor(tui as never, {
       borderColor: (s) => theme.fg("accent", s),
@@ -387,8 +383,7 @@ export class ReviewComponent {
   }
 
   dispose(): void {
-    this.explanationAbort?.abort();
-    this.stopLoadingTimer();
+    this.explanationController.dispose();
   }
 
   private move(delta: number): void {
@@ -713,169 +708,22 @@ export class ReviewComponent {
     height: number,
     selectedLine?: ReviewLine,
   ): string[] {
-    const lines: string[] = [];
-    const title = this.theme.fg("accent", this.theme.bold("Comments"));
     const selection = this.getActiveCommentSelection();
-    const currentComment = this.getCommentForSelection(selection);
-
-    lines.push(truncateToWidth(title, width));
-    lines.push(
-      truncateToWidth(
-        this.theme.fg(
-          "dim",
-          selection
-            ? this.getFooterText(selectedLine)
-            : selectedLine
-              ? formatLocation(selectedLine)
-              : "No selection",
-        ),
-        width,
-      ),
-    );
-    lines.push("");
-
-    if (this.editMode && this.editingCommentKey === GLOBAL_COMMENT_KEY) {
-      lines[1] = truncateToWidth(
-        this.theme.fg("dim", "Overall diff comment"),
-        width,
-      );
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "dim",
-            "Editing overall diff comment. Enter saves. Esc or Ctrl+C cancels.",
-          ),
-          width,
-        ),
-      );
-      lines.push("");
-      for (const line of this.editor.render(Math.max(10, width))) {
-        lines.push(truncateToWidth(line, width));
-      }
-      return lines.slice(0, height);
-    }
-
-    const globalComment = this.comments.get(GLOBAL_COMMENT_KEY);
-    if (globalComment) {
-      lines.push(
-        truncateToWidth(
-          this.theme.fg("accent", this.theme.bold("Overall diff comment")),
-          width,
-        ),
-      );
-      lines.push(
-        ...wrapTextWithAnsi(this.theme.fg("text", globalComment.text), width),
-      );
-      lines.push(...wrapTextWithAnsi(this.theme.fg("dim", "C edits"), width));
-      lines.push("");
-    }
-
-    if (!selectedLine) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg("muted", "No diff lines available."),
-          width,
-        ),
-      );
-      return lines.slice(0, height);
-    }
-
-    if (!selection) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "muted",
-            "Move to a diff line and press c to add a comment, or press C for an overall diff comment.",
-          ),
-          width,
-        ),
-      );
-      return lines.slice(0, height);
-    }
-
-    if (this.editMode && currentComment?.id === this.editingCommentKey) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "dim",
-            "Editing comment. Enter saves. Esc or Ctrl+C cancels.",
-          ),
-          width,
-        ),
-      );
-      lines.push("");
-      for (const line of this.editor.render(Math.max(10, width))) {
-        lines.push(truncateToWidth(line, width));
-      }
-    } else if (this.editMode && this.editingCommentKey) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "dim",
-            "Editing comment. Enter saves. Esc or Ctrl+C cancels.",
-          ),
-          width,
-        ),
-      );
-      lines.push("");
-      for (const line of this.editor.render(Math.max(10, width))) {
-        lines.push(truncateToWidth(line, width));
-      }
-    } else if (currentComment) {
-      lines.push(
-        ...wrapTextWithAnsi(this.theme.fg("text", currentComment.text), width),
-      );
-      lines.push("");
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg("dim", "x deletes this comment • c edits"),
-          width,
-        ),
-      );
-    } else {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "muted",
-            this.hasSelection()
-              ? "No comment on this range."
-              : "No comment on this line.",
-          ),
-          width,
-        ),
-      );
-      lines.push("");
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "dim",
-            this.hasSelection()
-              ? "Press c to add a range comment, or C for an overall diff comment."
-              : "Press c to add one. Use J/K to extend a range. Press C for an overall diff comment.",
-          ),
-          width,
-        ),
-      );
-    }
-
-    lines.push("");
-    lines.push(
-      truncateToWidth(
-        this.theme.fg("accent", this.theme.bold("Excerpt")),
-        width,
-      ),
-    );
-    const excerpt = this.lines
-      .slice(selection.start, selection.end + 1)
-      .map((line) => line.text)
-      .join("\n");
-    lines.push(
-      ...wrapTextWithAnsi(
-        this.theme.fg("toolDiffContext", excerpt || "(blank line)"),
-        width,
-      ),
-    );
-    return lines.slice(0, height);
+    return renderCommentsPaneContent({
+      width,
+      height,
+      selectedLine,
+      theme: this.theme,
+      lines: this.lines,
+      comments: this.comments,
+      editor: this.editor,
+      editMode: this.editMode,
+      editingCommentKey: this.editingCommentKey,
+      selection,
+      currentComment: this.getCommentForSelection(selection),
+      footerText: this.getFooterText(selectedLine),
+      hasSelection: this.hasSelection(),
+    });
   }
 
   private renderExplanationPane(
@@ -883,198 +731,21 @@ export class ReviewComponent {
     height: number,
     selectedLine?: ReviewLine,
   ): string[] {
-    const lines: string[] = [];
-    const title = this.theme.fg("accent", this.theme.bold("Explanation"));
-    const scope = this.getCurrentHunkScope();
-
-    lines.push(truncateToWidth(title, width));
-    lines.push(
-      truncateToWidth(
-        this.theme.fg(
-          "dim",
-          scope?.title ??
-            (selectedLine ? formatLocation(selectedLine) : "No selection"),
-        ),
-        width,
-      ),
-    );
-    lines.push("");
-
-    if (!this.explainer) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg("warning", "Diff explanations are unavailable."),
-          width,
-        ),
-      );
-      return lines.slice(0, height);
-    }
-
-    if (!scope) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "muted",
-            "Move to a changed hunk and press ? to generate an explanation.",
-          ),
-          width,
-        ),
-      );
-      return lines.slice(0, height);
-    }
-
-    const explanation = this.explanations.get(scope.key);
-    if (!explanation) {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "muted",
-            "No explanation generated yet. Press ? again after returning to comments to generate this hunk.",
-          ),
-          width,
-        ),
-      );
-    } else if (explanation.status === "loading") {
-      const spinner = this.getLoadingFrame();
-      lines.push(
-        truncateToWidth(
-          this.theme.fg("accent", `${spinner} Generating explanation...`),
-          width,
-        ),
-      );
-      if (explanation.text.trim()) {
-        lines.push("");
-        lines.push(
-          ...wrapTextWithAnsi(this.theme.fg("text", explanation.text), width),
-        );
-      }
-    } else if (explanation.status === "error") {
-      lines.push(
-        ...wrapTextWithAnsi(
-          this.theme.fg(
-            "warning",
-            `Unable to explain diff: ${explanation.message}`,
-          ),
-          width,
-        ),
-      );
-    } else {
-      lines.push(
-        ...wrapTextWithAnsi(this.theme.fg("text", explanation.text), width),
-      );
-    }
-
-    lines.push("");
-    lines.push(...wrapTextWithAnsi(this.theme.fg("dim", "? comments"), width));
-    return lines.slice(0, height);
+    return renderExplanationPaneContent({
+      width,
+      height,
+      selectedLine,
+      theme: this.theme,
+      scope: this.getCurrentHunkScope(),
+      controller: this.explanationController,
+    });
   }
 
   private ensureCurrentExplanation(): void {
-    const scope = this.getCurrentHunkScope();
-    if (!scope || !this.explainer) return;
-    if (this.explanations.has(scope.key)) return;
-
-    this.explanationAbort?.abort();
-    const controller = new AbortController();
-    this.explanationAbort = controller;
-    const requestId = ++this.explanationRequestId;
-    let text = "";
-
-    this.explanations.set(scope.key, { status: "loading", text });
-    this.startLoadingTimer();
-
-    void this.explainer
-      .explain(scope, {
-        signal: controller.signal,
-        onDelta: (delta) => {
-          if (requestId !== this.explanationRequestId) return;
-          text += delta;
-          this.explanations.set(scope.key, { status: "loading", text });
-          this.tui.requestRender();
-        },
-      })
-      .then((finalText) => {
-        if (requestId !== this.explanationRequestId) return;
-        this.explanations.set(scope.key, {
-          status: "ready",
-          text: finalText.trim() || text.trim() || "No explanation returned.",
-        });
-      })
-      .catch((error) => {
-        if (requestId !== this.explanationRequestId) return;
-        if (controller.signal.aborted) return;
-        this.explanations.set(scope.key, {
-          status: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      })
-      .finally(() => {
-        if (requestId !== this.explanationRequestId) return;
-        this.stopLoadingTimerIfIdle();
-        this.tui.requestRender();
-      });
-
-    this.tui.requestRender();
+    this.explanationController.ensure(this.getCurrentHunkScope());
   }
 
-  private getCurrentHunkScope(): ExplanationScope | undefined {
-    const selectedLine = this.lines[this.selected];
-    if (!selectedLine?.filePath || !selectedLine.hunkLabel) return undefined;
-
-    let start = this.selected;
-    while (
-      start > 0 &&
-      this.lines[start - 1]?.filePath === selectedLine.filePath &&
-      this.lines[start - 1]?.hunkLabel === selectedLine.hunkLabel
-    ) {
-      start--;
-    }
-
-    let end = this.selected;
-    while (
-      end + 1 < this.lines.length &&
-      this.lines[end + 1]?.filePath === selectedLine.filePath &&
-      this.lines[end + 1]?.hunkLabel === selectedLine.hunkLabel
-    ) {
-      end++;
-    }
-
-    const diffText = this.lines
-      .slice(start, end + 1)
-      .map((line) => line.text)
-      .join("\n");
-    return {
-      key: `hunk:${selectedLine.filePath}:${selectedLine.hunkLabel}:${start}:${end}`,
-      kind: "hunk",
-      title: `${selectedLine.filePath} ${selectedLine.hunkLabel}`,
-      filePath: selectedLine.filePath,
-      diffText,
-    };
-  }
-
-  private getLoadingFrame(): string {
-    const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    return frames[this.loadingFrame % frames.length] ?? "⠋";
-  }
-
-  private startLoadingTimer(): void {
-    if (this.loadingTimer) return;
-    this.loadingTimer = setInterval(() => {
-      this.loadingFrame++;
-      this.tui.requestRender();
-    }, 120);
-  }
-
-  private stopLoadingTimerIfIdle(): void {
-    const hasLoading = [...this.explanations.values()].some(
-      (explanation) => explanation.status === "loading",
-    );
-    if (!hasLoading) this.stopLoadingTimer();
-  }
-
-  private stopLoadingTimer(): void {
-    if (!this.loadingTimer) return;
-    clearInterval(this.loadingTimer);
-    this.loadingTimer = undefined;
+  private getCurrentHunkScope() {
+    return getCurrentHunkScope(this.lines, this.selected);
   }
 }
