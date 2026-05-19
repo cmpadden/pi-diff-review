@@ -46,6 +46,21 @@ pi install ./pi-diff-review
 - Comments are cached per session and restored when reopening the same diff
 - `q` to exit
 
+## Development
+
+Install [pre-commit](https://pre-commit.com/) and enable the repository hooks to run typechecking, tests, and formatting checks before each commit:
+
+```bash
+pre-commit install
+```
+
+Run the same checks manually with either:
+
+```bash
+pre-commit run --all-files
+npm run precommit
+```
+
 ## Release
 
 See [RELEASE.md](./RELEASE.md).
