@@ -2,7 +2,13 @@ import {
   getLanguageFromPath,
   highlightCode,
 } from "@earendil-works/pi-coding-agent";
-import { Editor, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+  Editor,
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import type { DiffExplainer } from "./explain.ts";
 import {
   GLOBAL_COMMENT_KEY,
@@ -15,12 +21,8 @@ import {
   ExplanationController,
   getCurrentHunkScope,
 } from "./explanation-controller.ts";
-import { formatLocation } from "./prompt.ts";
+import { formatCommentLocation, formatLocation } from "./prompt.ts";
 import { ReviewNavigationState } from "./review-navigation.ts";
-import {
-  renderCommentsPane as renderCommentsPaneContent,
-  renderExplanationPane as renderExplanationPaneContent,
-} from "./review-panes.ts";
 import { padToWidth, lineNumberCell } from "./render-utils.ts";
 import { buildSplitDiffRows } from "./split-diff.ts";
 import type {
@@ -30,28 +32,48 @@ import type {
   ReviewResult,
   ReviewTheme,
   ReviewTui,
-  RightPaneMode,
   SelectionBounds,
   SplitDiffCell,
   SplitDiffRow,
 } from "./types.ts";
+
+type InlineBoxPart = "top" | "body" | "bottom";
+type InlineBoxRowKind = "comment" | "editor" | "explanation";
+type InlineBoxRow = {
+  kind: InlineBoxRowKind;
+  text: string;
+  part: InlineBoxPart;
+};
+
+type AnnotatedDiffRow =
+  | { kind: "diff"; lineIndex: number }
+  | { kind: "split"; splitRowIndex: number }
+  | InlineBoxRow;
 
 export class ReviewComponent {
   private navigation: ReviewNavigationState;
   private editMode = false;
   private editingCommentKey?: string;
 
-  private showRightPane = true;
-  private rightPaneMode: RightPaneMode = "comments";
+  private inlineAnnotationsVisible = true;
+  private visibleExplanationKeys = new Set<string>();
   private explanationController: ExplanationController;
   private editor: Editor;
   private splitRows?: SplitDiffRow[];
-  private splitRowByLineIndex?: number[];
   private lineIndexById = new Map<string, number>();
   private commentLineKeys = new Map<number, string[]>();
   private commentsRevision = 0;
   private commentLineKeysRevision = -1;
   private highlightedLineCache = new Map<string, string>();
+  private annotatedRows?: AnnotatedDiffRow[];
+  private annotatedRowsWidth = 0;
+  private annotatedRowsRevision = -1;
+  private annotatedRowsEditMode = false;
+  private annotatedRowsEditingCommentKey?: string;
+  private annotatedRowsMode?: DiffRenderMode;
+  private annotatedRowsInlineAnnotationsVisible = true;
+  private annotatedRowsVisibleExplanationCount = 0;
+  private annotatedRowByLineIndex?: number[];
 
   constructor(
     private tui: ReviewTui,
@@ -120,6 +142,7 @@ export class ReviewComponent {
         this.markCommentsChanged();
       }
 
+      this.navigation.clearSelection();
       this.exitEditMode();
     };
   }
@@ -151,6 +174,7 @@ export class ReviewComponent {
         return;
       }
       this.editor.handleInput(data);
+      this.invalidateAnnotatedRows();
       this.tui.requestRender();
       return;
     }
@@ -168,7 +192,7 @@ export class ReviewComponent {
       return;
     }
     if (data === "t") {
-      this.toggleRightPane();
+      this.toggleInlineAnnotations();
       return;
     }
     if (data === "v") {
@@ -250,23 +274,17 @@ export class ReviewComponent {
         this.theme.fg(
           "dim",
           this.editMode
-            ? `${this.lines.length} lines • ${this.comments.size} comments • editing comment • Enter save • Esc/Ctrl+C cancel`
+            ? `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • editing inline comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
-              ? `${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • C overall comment • Enter submit`
-              : `${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • ${this.showRightPane ? "sidebar shown" : "sidebar hidden"} • j/k move • g/G top/bottom • ctrl-u/d page • t sidebar • v unified/split • ? explain • J/K extend • c comment • C overall • x delete • n/p hunk • Enter submit • q quit`,
+              ? `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • C overall comment • Enter submit`
+              : `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • inline ${this.inlineAnnotationsVisible ? "shown" : "hidden"} • j/k move • g/G top/bottom • ctrl-u/d page • t annotations • v unified/split • ? explain • J/K extend • c comment • C overall • x delete • n/p hunk • Enter submit • q quit`,
         ),
         width,
       ),
     );
-    if (!this.showRightPane) {
-      this.ensureScroll(viewportHeight);
-      output.push(...this.renderFullWidthDiffRows(width, viewportHeight));
-    } else {
-      this.ensureScroll(viewportHeight);
-      output.push(
-        ...this.renderSideBySide(width, viewportHeight, selectedLine),
-      );
-    }
+
+    this.ensureScroll(viewportHeight, width);
+    output.push(...this.renderAnnotatedDiffRows(width, viewportHeight));
 
     output.push(
       truncateToWidth(
@@ -277,105 +295,415 @@ export class ReviewComponent {
     return output;
   }
 
-  private renderSideBySide(
-    width: number,
-    height: number,
-    selectedLine?: ReviewLine,
-  ): string[] {
-    const rightWidth = Math.max(28, Math.floor(width * 0.34));
-    const separatorWidth = 3;
-    const leftWidth = Math.max(30, width - rightWidth - separatorWidth);
-    const rightPane = this.renderRightPane(rightWidth, height, selectedLine);
+  private renderAnnotatedDiffRows(width: number, height: number): string[] {
+    const rows = this.getAnnotatedRows(width);
     const output: string[] = [];
-    const diffPane = this.renderDiffRows(leftWidth, height);
 
     for (let row = 0; row < height; row++) {
-      const left = diffPane[row] ?? " ".repeat(leftWidth);
-      const right = rightPane[row] ?? " ".repeat(rightWidth);
-      const combined = `${padToWidth(left, leftWidth)}${this.theme.fg("borderMuted", " │ ")}${padToWidth(right, rightWidth)}`;
-      output.push(truncateToWidth(combined, width));
-    }
-
-    return output;
-  }
-
-  private renderDiffRows(width: number, height: number): string[] {
-    return this.diffRenderMode === "split"
-      ? this.renderSplitDiffRows(width, height)
-      : this.renderUnifiedDiffRows(width, height);
-  }
-
-  private renderFullWidthDiffRows(width: number, height: number): string[] {
-    return this.renderDiffRows(width, height).map((row) =>
-      padToWidth(truncateToWidth(row, width), width),
-    );
-  }
-
-  private renderUnifiedDiffRows(width: number, height: number): string[] {
-    const output: string[] = [];
-    const selection = this.getSelectionBounds();
-
-    for (let row = 0; row < height; row++) {
-      const index = this.scrollTop + row;
-      const line = this.lines[index];
-      output.push(
-        line
-          ? this.renderDiffLine(
-              line,
-              index,
-              width,
-              index === this.selected,
-              selection,
-            )
-          : " ".repeat(width),
-      );
-    }
-
-    return output;
-  }
-
-  private renderSplitDiffRows(width: number, height: number): string[] {
-    const rows = this.getSplitDiffRows();
-    const output: string[] = [];
-    const separatorWidth = 3;
-    const leftWidth = Math.max(10, Math.floor((width - separatorWidth) / 2));
-    const rightWidth = Math.max(10, width - leftWidth - separatorWidth);
-
-    for (let row = 0; row < height; row++) {
-      const splitRow = rows[this.scrollTop + row];
-      if (!splitRow) {
+      const annotated = rows[this.scrollTop + row];
+      if (!annotated) {
         output.push(" ".repeat(width));
         continue;
       }
 
-      if (splitRow.kind === "full") {
+      if (annotated.kind === "diff") {
+        const index = annotated.lineIndex;
+        const line = this.lines[index]!;
         output.push(
           this.renderDiffLine(
-            splitRow.cell.line,
-            splitRow.cell.index,
+            line,
+            index,
             width,
-            splitRow.cell.index === this.selected,
+            index === this.selected,
             this.getSelectionBounds(),
           ),
         );
         continue;
       }
 
-      const left = splitRow.left
-        ? this.renderSplitDiffCell(splitRow.left, leftWidth, "left")
-        : " ".repeat(leftWidth);
-      const right = splitRow.right
-        ? this.renderSplitDiffCell(splitRow.right, rightWidth, "right")
-        : " ".repeat(rightWidth);
-      output.push(
-        truncateToWidth(
-          `${padToWidth(left, leftWidth)}${this.theme.fg("borderMuted", " │ ")}${padToWidth(right, rightWidth)}`,
-          width,
-        ),
-      );
+      if (annotated.kind === "split") {
+        output.push(this.renderSplitDiffRowAt(annotated.splitRowIndex, width));
+        continue;
+      }
+
+      output.push(this.renderInlineAnnotationRow(annotated, width));
     }
 
     return output;
+  }
+
+  private getAnnotatedRows(width: number): AnnotatedDiffRow[] {
+    if (
+      this.annotatedRows &&
+      this.annotatedRowsWidth === width &&
+      this.annotatedRowsRevision === this.commentsRevision &&
+      this.annotatedRowsEditMode === this.editMode &&
+      this.annotatedRowsEditingCommentKey === this.editingCommentKey &&
+      this.annotatedRowsMode === this.diffRenderMode &&
+      this.annotatedRowsInlineAnnotationsVisible ===
+        this.inlineAnnotationsVisible &&
+      this.annotatedRowsVisibleExplanationCount ===
+        this.visibleExplanationKeys.size &&
+      this.visibleExplanationKeys.size === 0
+    ) {
+      return this.annotatedRows;
+    }
+
+    const rows: AnnotatedDiffRow[] = [];
+    const rowByLineIndex: number[] = [];
+
+    this.pushGlobalAnnotationRows(rows, width);
+
+    if (this.diffRenderMode === "split") {
+      this.pushAnnotatedSplitRows(rows, rowByLineIndex, width);
+    } else {
+      this.pushAnnotatedUnifiedRows(rows, rowByLineIndex, width);
+    }
+
+    this.annotatedRows = rows;
+    this.annotatedRowsWidth = width;
+    this.annotatedRowsRevision = this.commentsRevision;
+    this.annotatedRowsEditMode = this.editMode;
+    this.annotatedRowsEditingCommentKey = this.editingCommentKey;
+    this.annotatedRowsMode = this.diffRenderMode;
+    this.annotatedRowsInlineAnnotationsVisible = this.inlineAnnotationsVisible;
+    this.annotatedRowsVisibleExplanationCount =
+      this.visibleExplanationKeys.size;
+    this.annotatedRowByLineIndex = rowByLineIndex;
+    return rows;
+  }
+
+  private pushAnnotatedUnifiedRows(
+    rows: AnnotatedDiffRow[],
+    rowByLineIndex: number[],
+    width: number,
+  ): void {
+    for (let index = 0; index < this.lines.length; index++) {
+      rowByLineIndex[index] = rows.length;
+      rows.push({ kind: "diff", lineIndex: index });
+
+      if (!this.inlineAnnotationsVisible) continue;
+
+      this.pushInlineCommentRows(rows, index, width);
+      this.pushInlineEditorRows(rows, index, width);
+      this.pushInlineExplanationRows(rows, index, width);
+    }
+  }
+
+  private pushAnnotatedSplitRows(
+    rows: AnnotatedDiffRow[],
+    rowByLineIndex: number[],
+    width: number,
+  ): void {
+    const splitRows = this.getSplitDiffRows();
+    for (
+      let splitRowIndex = 0;
+      splitRowIndex < splitRows.length;
+      splitRowIndex++
+    ) {
+      const splitRow = splitRows[splitRowIndex]!;
+      const lineIndexes = this.getLineIndexesForSplitRow(splitRow);
+      for (const lineIndex of lineIndexes) {
+        rowByLineIndex[lineIndex] = rows.length;
+      }
+
+      rows.push({ kind: "split", splitRowIndex });
+      if (!this.inlineAnnotationsVisible) continue;
+
+      for (const lineIndex of lineIndexes) {
+        this.pushInlineCommentRows(rows, lineIndex, width);
+        this.pushInlineEditorRows(rows, lineIndex, width);
+        this.pushInlineExplanationRows(rows, lineIndex, width);
+      }
+    }
+  }
+
+  private getLineIndexesForSplitRow(row: SplitDiffRow): number[] {
+    if (row.kind === "full") return [row.cell.index];
+    const indexes: number[] = [];
+    if (row.left) indexes.push(row.left.index);
+    if (row.right && row.right.index !== row.left?.index) {
+      indexes.push(row.right.index);
+    }
+    return indexes;
+  }
+
+  private pushGlobalAnnotationRows(
+    rows: AnnotatedDiffRow[],
+    width: number,
+  ): void {
+    if (!this.inlineAnnotationsVisible) return;
+
+    const globalComment = this.comments.get(GLOBAL_COMMENT_KEY);
+    if (globalComment) {
+      this.pushAnnotationBlock(
+        rows,
+        "comment",
+        globalComment.text,
+        width,
+        "Overall diff comment",
+      );
+    }
+
+    if (this.editMode && this.editingCommentKey === GLOBAL_COMMENT_KEY) {
+      this.pushInlineEditorBlock(rows, "Draft overall diff note", width);
+    }
+  }
+
+  private pushInlineCommentRows(
+    rows: AnnotatedDiffRow[],
+    lineIndex: number,
+    width: number,
+  ): void {
+    for (const comment of this.getCommentsEndingAtLine(lineIndex)) {
+      if (this.editMode && comment.id === this.editingCommentKey) continue;
+      this.pushAnnotationBlock(
+        rows,
+        "comment",
+        comment.text,
+        width,
+        formatCommentLocation(comment),
+      );
+    }
+  }
+
+  private pushInlineEditorRows(
+    rows: AnnotatedDiffRow[],
+    lineIndex: number,
+    width: number,
+  ): void {
+    if (!this.editMode || this.editingCommentKey === GLOBAL_COMMENT_KEY) return;
+    const selection = this.getActiveCommentSelection();
+    if (!selection || selection.end !== lineIndex) return;
+    this.pushInlineEditorBlock(
+      rows,
+      `Draft note - ${this.formatSelectionLocation(selection)}`,
+      width,
+    );
+  }
+
+  private pushInlineExplanationRows(
+    rows: AnnotatedDiffRow[],
+    lineIndex: number,
+    width: number,
+  ): void {
+    const scope = getCurrentHunkScope(this.lines, lineIndex);
+    if (!scope || !this.visibleExplanationKeys.has(scope.key)) return;
+
+    const end = this.getHunkEndIndex(lineIndex);
+    if (end !== lineIndex) return;
+
+    const explanation = this.explanationController.getState(scope);
+    if (!this.explanationController.isAvailable) {
+      this.pushExplanationBlock(rows, "Explanation unavailable.", width);
+    } else if (!explanation) {
+      this.pushExplanationBlock(rows, "No explanation generated yet.", width);
+    } else if (explanation.status === "loading") {
+      this.pushExplanationBlock(
+        rows,
+        `${this.explanationController.getLoadingFrame()} ${explanation.text || "Generating explanation..."}`,
+        width,
+      );
+    } else if (explanation.status === "error") {
+      this.pushExplanationBlock(
+        rows,
+        `Explanation failed: ${explanation.message}`,
+        width,
+      );
+    } else {
+      this.pushExplanationBlock(rows, explanation.text, width);
+    }
+  }
+
+  private pushAnnotationBlock(
+    rows: AnnotatedDiffRow[],
+    kind: "comment",
+    text: string,
+    width: number,
+    title?: string,
+  ): void {
+    this.pushCommentBlock(rows, text, width, title);
+  }
+
+  private pushCommentBlock(
+    rows: AnnotatedDiffRow[],
+    text: string,
+    width: number,
+    title?: string,
+  ): void {
+    rows.push({
+      kind: "comment",
+      text: title ? this.theme.fg("accent", ` ${title} `) : "",
+      part: "top",
+    });
+    const wrapped = wrapTextWithAnsi(
+      this.theme.fg("text", text),
+      this.getInlineContentWidth(width),
+    );
+    for (const line of wrapped.length > 0 ? wrapped : [""]) {
+      rows.push({ kind: "comment", text: line, part: "body" });
+    }
+    rows.push({ kind: "comment", text: "", part: "bottom" });
+  }
+
+  private pushExplanationBlock(
+    rows: AnnotatedDiffRow[],
+    text: string,
+    width: number,
+  ): void {
+    rows.push({
+      kind: "explanation",
+      text: this.theme.fg("accent", " ✨ Explanation "),
+      part: "top",
+    });
+    const wrapped = wrapTextWithAnsi(
+      this.theme.fg("muted", text),
+      this.getInlineContentWidth(width),
+    );
+    for (const line of wrapped.length > 0 ? wrapped : [""]) {
+      rows.push({ kind: "explanation", text: line, part: "body" });
+    }
+    rows.push({ kind: "explanation", text: "", part: "bottom" });
+  }
+
+  private pushInlineEditorBlock(
+    rows: AnnotatedDiffRow[],
+    title: string,
+    width: number,
+  ): void {
+    rows.push({
+      kind: "editor",
+      text: this.theme.fg("accent", ` ${title} `),
+      part: "top",
+    });
+    const editorLines = this.editor.render(this.getInlineContentWidth(width));
+    const bodyLines = editorLines.slice(1, -1);
+    for (const line of bodyLines.length > 0 ? bodyLines : [""]) {
+      rows.push({ kind: "editor", text: line, part: "body" });
+    }
+    rows.push({ kind: "editor", text: "", part: "bottom" });
+  }
+
+  private renderInlineAnnotationRow(
+    row: Exclude<AnnotatedDiffRow, { kind: "diff" } | { kind: "split" }>,
+    width: number,
+  ): string {
+    if (row.kind === "editor") {
+      return this.renderInlineBoxRow(
+        { text: row.text, part: row.part },
+        width,
+        "accent",
+      );
+    }
+
+    if (row.kind === "comment" || row.kind === "explanation") {
+      return this.renderInlineBoxRow(
+        { text: row.text, part: row.part },
+        width,
+        "borderMuted",
+      );
+    }
+
+    return " ".repeat(width);
+  }
+
+  private renderInlineBoxRow(
+    row: { text: string; part: "top" | "body" | "bottom" },
+    width: number,
+    borderColor: "accent" | "borderMuted",
+  ): string {
+    const indent = "      ";
+    const contentWidth = this.getInlineContentWidth(width);
+    const body =
+      row.part === "top" || row.part === "bottom"
+        ? this.renderInlineBoxHorizontal(row.text, contentWidth, borderColor)
+        : padToWidth(truncateToWidth(row.text, contentWidth), contentWidth);
+    const left = row.part === "top" ? "╭" : row.part === "bottom" ? "╰" : "│";
+    const right = row.part === "top" ? "╮" : row.part === "bottom" ? "╯" : "│";
+    return padToWidth(
+      truncateToWidth(
+        `${indent}${this.theme.fg(borderColor, left)}${body}${this.theme.fg(borderColor, right)}`,
+        width,
+      ),
+      width,
+    );
+  }
+
+  private renderInlineBoxHorizontal(
+    title: string,
+    width: number,
+    borderColor: "accent" | "borderMuted",
+  ): string {
+    if (!title) return this.theme.fg(borderColor, "─".repeat(width));
+
+    const visibleTitle = truncateToWidth(title, Math.max(0, width));
+    const remaining = Math.max(0, width - visibleWidth(visibleTitle));
+    return `${visibleTitle}${this.theme.fg(borderColor, "─".repeat(remaining))}`;
+  }
+
+  private getInlineContentWidth(width: number): number {
+    return Math.max(10, width - 8);
+  }
+
+  private invalidateAnnotatedRows(): void {
+    this.annotatedRows = undefined;
+    this.annotatedRowByLineIndex = undefined;
+  }
+
+  private getCommentsEndingAtLine(lineIndex: number): ReviewComment[] {
+    const comments: ReviewComment[] = [];
+    for (const comment of this.comments.values()) {
+      if (comment.global) continue;
+      const start = this.lineIndexById.get(comment.startLineId);
+      const end = this.lineIndexById.get(comment.endLineId);
+      if (start == null || end == null) continue;
+      if (Math.max(start, end) === lineIndex) comments.push(comment);
+    }
+    return comments.sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  private getHunkEndIndex(selected: number): number | undefined {
+    const selectedLine = this.lines[selected];
+    if (!selectedLine?.filePath || !selectedLine.hunkLabel) return undefined;
+
+    let end = selected;
+    while (
+      end + 1 < this.lines.length &&
+      this.lines[end + 1]?.filePath === selectedLine.filePath &&
+      this.lines[end + 1]?.hunkLabel === selectedLine.hunkLabel
+    ) {
+      end++;
+    }
+    return end;
+  }
+
+  private renderSplitDiffRowAt(splitRowIndex: number, width: number): string {
+    const splitRow = this.getSplitDiffRows()[splitRowIndex];
+    if (!splitRow) return " ".repeat(width);
+
+    if (splitRow.kind === "full") {
+      return this.renderDiffLine(
+        splitRow.cell.line,
+        splitRow.cell.index,
+        width,
+        splitRow.cell.index === this.selected,
+        this.getSelectionBounds(),
+      );
+    }
+
+    const separatorWidth = 3;
+    const leftWidth = Math.max(10, Math.floor((width - separatorWidth) / 2));
+    const rightWidth = Math.max(10, width - leftWidth - separatorWidth);
+    const left = splitRow.left
+      ? this.renderSplitDiffCell(splitRow.left, leftWidth, "left")
+      : " ".repeat(leftWidth);
+    const right = splitRow.right
+      ? this.renderSplitDiffCell(splitRow.right, rightWidth, "right")
+      : " ".repeat(rightWidth);
+    return truncateToWidth(
+      `${padToWidth(left, leftWidth)}${this.theme.fg("borderMuted", " │ ")}${padToWidth(right, rightWidth)}`,
+      width,
+    );
   }
 
   private getContentHeight(): number {
@@ -387,6 +715,7 @@ export class ReviewComponent {
 
   invalidate(): void {
     this.highlightedLineCache.clear();
+    this.invalidateAnnotatedRows();
   }
 
   dispose(): void {
@@ -409,23 +738,28 @@ export class ReviewComponent {
     this.tui.requestRender(true);
   }
 
-  private toggleRightPane(): void {
-    this.showRightPane = !this.showRightPane;
+  private toggleInlineAnnotations(): void {
+    this.inlineAnnotationsVisible = !this.inlineAnnotationsVisible;
+    this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
 
-  private showCommentsPane(): void {
-    this.showRightPane = true;
-    this.rightPaneMode = "comments";
+  private hideInlineExplanation(): void {
+    this.visibleExplanationKeys.clear();
   }
 
   private toggleExplanationPane(): void {
-    this.showRightPane = true;
-    this.rightPaneMode =
-      this.rightPaneMode === "comments" ? "explanation" : "comments";
-    if (this.rightPaneMode === "explanation") {
+    const scope = this.getCurrentHunkScope();
+    if (!scope) return;
+
+    if (this.visibleExplanationKeys.has(scope.key)) {
+      this.visibleExplanationKeys.delete(scope.key);
+    } else {
+      this.visibleExplanationKeys.add(scope.key);
       this.ensureCurrentExplanation();
     }
+
+    this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
 
@@ -464,6 +798,16 @@ export class ReviewComponent {
     return getSelectionKey(this.lines, start, end);
   }
 
+  private formatSelectionLocation(selection: SelectionBounds): string {
+    const startLine = this.lines[selection.start];
+    const endLine = this.lines[selection.end];
+    if (!startLine || !endLine) return "diff";
+
+    const start = formatLocation(startLine);
+    const end = formatLocation(endLine);
+    return start === end ? start : `${start} -> ${end}`;
+  }
+
   private getCommentForSelection(
     selection: SelectionBounds | undefined,
   ): ReviewComment | undefined {
@@ -480,6 +824,7 @@ export class ReviewComponent {
 
   private markCommentsChanged(): void {
     this.commentsRevision++;
+    this.invalidateAnnotatedRows();
     this.onCommentsChanged?.(this.comments);
   }
 
@@ -536,10 +881,12 @@ export class ReviewComponent {
 
   private startGlobalEditMode(): void {
     const existing = this.comments.get(GLOBAL_COMMENT_KEY);
-    this.showCommentsPane();
+    this.inlineAnnotationsVisible = true;
+    this.hideInlineExplanation();
     this.editMode = true;
     this.editingCommentKey = GLOBAL_COMMENT_KEY;
     this.editor.setText(existing?.text ?? "");
+    this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
 
@@ -552,13 +899,15 @@ export class ReviewComponent {
     if (startLine.filePath !== endLine.filePath) return;
 
     const existing = this.getCommentForSelection(selection);
-    this.showCommentsPane();
+    this.inlineAnnotationsVisible = true;
+    this.hideInlineExplanation();
     this.editMode = true;
     this.editingCommentKey = this.getSelectionKey(
       selection.start,
       selection.end,
     );
     this.editor.setText(existing?.text ?? "");
+    this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
 
@@ -566,28 +915,25 @@ export class ReviewComponent {
     this.editMode = false;
     this.editingCommentKey = undefined;
     this.editor.setText("");
+    this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
 
   private getSplitDiffRows(): SplitDiffRow[] {
     if (this.splitRows) return this.splitRows;
 
-    const { rows, rowByLineIndex } = buildSplitDiffRows(this.lines);
+    const { rows } = buildSplitDiffRows(this.lines);
     this.splitRows = rows;
-    this.splitRowByLineIndex = rowByLineIndex;
     return rows;
   }
 
-  private getSelectedDisplayRow(): number {
-    if (this.diffRenderMode === "unified") return this.selected;
-    this.getSplitDiffRows();
-    return this.splitRowByLineIndex?.[this.selected] ?? 0;
+  private getSelectedDisplayRow(width: number): number {
+    this.getAnnotatedRows(width);
+    return this.annotatedRowByLineIndex?.[this.selected] ?? 0;
   }
 
-  private getDisplayRowCount(): number {
-    return this.diffRenderMode === "unified"
-      ? this.lines.length
-      : this.getSplitDiffRows().length;
+  private getDisplayRowCount(width: number): number {
+    return this.getAnnotatedRows(width).length;
   }
 
   private renderSplitDiffCell(
@@ -597,7 +943,7 @@ export class ReviewComponent {
   ): string {
     const { line, index } = cell;
     const hasComment = this.getCommentKeysForLine(index).length > 0;
-    const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
+    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
     const lineNumber =
       side === "left" ? line.oldLineNumber : line.newLineNumber;
     const prefix = `${commentMark} ${lineNumberCell(lineNumber)} `;
@@ -613,11 +959,11 @@ export class ReviewComponent {
     return this.applyDiffBackground(line, styled, width);
   }
 
-  private ensureScroll(viewportHeight: number): void {
+  private ensureScroll(viewportHeight: number, width: number): void {
     this.navigation.ensureScroll(
       viewportHeight,
-      this.getSelectedDisplayRow(),
-      this.getDisplayRowCount(),
+      this.getSelectedDisplayRow(width),
+      this.getDisplayRowCount(width),
     );
   }
 
@@ -686,7 +1032,7 @@ export class ReviewComponent {
     selection?: SelectionBounds,
   ): string {
     const hasComment = this.getCommentKeysForLine(index).length > 0;
-    const commentMark = hasComment ? this.theme.fg("warning", "●") : " ";
+    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
     const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
     const prefix = `${commentMark} ${numbers} `;
     let styled = this.renderDiffRowContent(line, prefix);
@@ -698,54 +1044,6 @@ export class ReviewComponent {
       return this.theme.bg("selectedBg", padToWidth(styled, width));
     }
     return this.applyDiffBackground(line, styled, width);
-  }
-
-  private renderRightPane(
-    width: number,
-    height: number,
-    selectedLine?: ReviewLine,
-  ): string[] {
-    return this.rightPaneMode === "explanation"
-      ? this.renderExplanationPane(width, height, selectedLine)
-      : this.renderCommentsPane(width, height, selectedLine);
-  }
-
-  private renderCommentsPane(
-    width: number,
-    height: number,
-    selectedLine?: ReviewLine,
-  ): string[] {
-    const selection = this.getActiveCommentSelection();
-    return renderCommentsPaneContent({
-      width,
-      height,
-      selectedLine,
-      theme: this.theme,
-      lines: this.lines,
-      comments: this.comments,
-      editor: this.editor,
-      editMode: this.editMode,
-      editingCommentKey: this.editingCommentKey,
-      selection,
-      currentComment: this.getCommentForSelection(selection),
-      footerText: this.getFooterText(selectedLine),
-      hasSelection: this.hasSelection(),
-    });
-  }
-
-  private renderExplanationPane(
-    width: number,
-    height: number,
-    selectedLine?: ReviewLine,
-  ): string[] {
-    return renderExplanationPaneContent({
-      width,
-      height,
-      selectedLine,
-      theme: this.theme,
-      scope: this.getCurrentHunkScope(),
-      controller: this.explanationController,
-    });
   }
 
   private ensureCurrentExplanation(): void {

@@ -65,7 +65,7 @@ Review a branch or commit range by passing any `git diff` arguments after `/diff
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
-- `t` toggles the comments/explanation sidebar
+- `t` toggles inline comments/explanations
 - `v` toggles the diff between unified and side-by-side split rendering
 - `?` toggles an AI-generated explanation for the current hunk
 - `J/K` to extend a highlighted selection into a comment range

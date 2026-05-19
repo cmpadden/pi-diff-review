@@ -59,5 +59,3 @@ export type ReviewTui = {
 };
 
 export type ReviewTheme = Theme;
-
-export type RightPaneMode = "comments" | "explanation";
