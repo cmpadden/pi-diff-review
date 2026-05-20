@@ -1,8 +1,25 @@
-# Releases
+# Contributing
+
+## Development
+
+Install [pre-commit](https://pre-commit.com/) and enable the repository hooks to run typechecking, tests, and formatting checks before each commit:
+
+```bash
+pre-commit install
+```
+
+Run the same checks manually with either:
+
+```bash
+pre-commit run --all-files
+npm run precommit
+```
+
+## Releases
 
 Releases are published by pushing a version tag that matches `package.json`.
 
-## One-time setup
+### One-time setup
 
 Configure npm Trusted Publishing for this package instead of using a long-lived token:
 
@@ -15,7 +32,7 @@ Configure npm Trusted Publishing for this package instead of using a long-lived 
 
 No `NPM_TOKEN` repository secret is required.
 
-## Publish a release
+### Publish a release
 
 From a clean working tree on the release branch:
 
