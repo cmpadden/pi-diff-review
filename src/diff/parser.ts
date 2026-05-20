@@ -5,7 +5,7 @@ import type {
   FileDiffMetadata,
   Hunk,
 } from "@pierre/diffs";
-import type { ReviewLine } from "./types.ts";
+import type { ReviewLine } from "../review/types.ts";
 
 export function parseDiff(diffText: string): ReviewLine[] {
   try {

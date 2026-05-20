@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseDiff } from "../src/diff-parser.ts";
+import { parseDiff } from "../../src/diff/parser.ts";
 
 describe("parseDiff", () => {
   it("parses additions, removals, context, file paths, and line numbers", () => {

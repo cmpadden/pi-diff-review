@@ -2,8 +2,8 @@ import type {
   DiffExplainer,
   ExplanationScope,
   ExplanationState,
-} from "./explain.ts";
-import type { ReviewLine, ReviewTui } from "./types.ts";
+} from "./explainer.ts";
+import type { ReviewLine, ReviewTui } from "../review/types.ts";
 
 const LOADING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

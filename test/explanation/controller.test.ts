@@ -3,9 +3,12 @@ import { describe, it } from "node:test";
 import {
   ExplanationController,
   getCurrentHunkScope,
-} from "../src/explanation-controller.ts";
-import type { DiffExplainer, ExplanationScope } from "../src/explain.ts";
-import type { ReviewLine } from "../src/types.ts";
+} from "../../src/explanation/controller.ts";
+import type {
+  DiffExplainer,
+  ExplanationScope,
+} from "../../src/explanation/explainer.ts";
+import type { ReviewLine } from "../../src/review/types.ts";
 
 function line(
   id: string,

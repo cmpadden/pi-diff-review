@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ReviewNavigationState } from "../src/review-navigation.ts";
+import { ReviewNavigationState } from "../../src/review/navigation.ts";
 
 describe("ReviewNavigationState", () => {
   it("clamps movement to available lines", () => {
