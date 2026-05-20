@@ -54,6 +54,10 @@ export class ReviewComponent {
   private navigation: ReviewNavigationState;
   private editMode = false;
   private editingCommentKey?: string;
+  private searchMode = false;
+  private searchQuery = "";
+  private draftSearchQuery = "";
+  private searchMessage = "";
 
   private inlineAnnotationsVisible = true;
   private visibleExplanationKeys = new Set<string>();
@@ -179,8 +183,15 @@ export class ReviewComponent {
       return;
     }
 
+    if (this.searchMode) {
+      this.handleSearchInput(data);
+      return;
+    }
+
     if (matchesKey(data, "escape")) {
-      if (this.hasSelection()) {
+      if (this.searchQuery) {
+        this.clearSearch();
+      } else if (this.hasSelection()) {
         this.clearSelection();
       } else {
         this.done({ action: "cancel" });
@@ -201,6 +212,10 @@ export class ReviewComponent {
     }
     if (data === "?") {
       this.toggleExplanationPane();
+      return;
+    }
+    if (data === "/") {
+      this.startSearchMode();
       return;
     }
     if (matchesKey(data, "ctrl+d")) {
@@ -236,7 +251,15 @@ export class ReviewComponent {
       return;
     }
     if (data === "n") {
-      this.jumpHunk(1);
+      if (this.searchQuery) {
+        this.jumpSearch(1);
+      } else {
+        this.jumpHunk(1);
+      }
+      return;
+    }
+    if (data === "N" && this.searchQuery) {
+      this.jumpSearch(-1);
       return;
     }
     if (data === "p") {
@@ -277,7 +300,7 @@ export class ReviewComponent {
             ? `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • editing inline comment • Enter save • Esc/Ctrl+C cancel`
             : this.hasSelection()
               ? `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • C overall comment • Enter submit`
-              : `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • inline ${this.inlineAnnotationsVisible ? "shown" : "hidden"} • j/k move • g/G top/bottom • ctrl-u/d page • t annotations • v unified/split • ? explain • J/K extend • c comment • C overall • x delete • n/p hunk • Enter submit • q quit`,
+              : `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • inline ${this.inlineAnnotationsVisible ? "shown" : "hidden"} • j/k move • g/G top/bottom • ctrl-u/d page • / search • t annotations • v unified/split • ? explain • J/K extend • c comment • C overall • x delete • ${this.searchQuery ? "n/N search" : "n/p hunk"} • Enter submit • q quit`,
         ),
         width,
       ),
@@ -846,6 +869,13 @@ export class ReviewComponent {
   }
 
   private getFooterText(selectedLine?: ReviewLine): string {
+    if (this.searchMode) {
+      return `Search: /${this.draftSearchQuery} • Enter jump • Esc cancel`;
+    }
+
+    const searchStatus = this.getSearchStatusText();
+    if (searchStatus) return searchStatus;
+
     const selection = this.getSelectionBounds();
     if (selection) {
       const count = selection.end - selection.start + 1;
@@ -854,6 +884,21 @@ export class ReviewComponent {
       return `Selected ${count} lines: ${formatLocation(startLine)} -> ${formatLocation(endLine)}`;
     }
     return `Selected: ${selectedLine ? formatLocation(selectedLine) : "(no selection)"}`;
+  }
+
+  private getSearchStatusText(): string {
+    if (this.searchMessage) return this.searchMessage;
+    if (!this.searchQuery) return "";
+
+    const matches = this.getSearchMatchIndexes(this.searchQuery);
+    if (matches.length === 0) return `No matches for /${this.searchQuery}`;
+
+    const current = matches.findIndex((index) => index === this.selected);
+    const position =
+      current >= 0
+        ? `${current + 1}/${matches.length}`
+        : `${matches.length} matches`;
+    return `Search /${this.searchQuery} • ${position} • n next • N previous • Esc clear search`;
   }
 
   private jumpHunk(direction: 1 | -1): void {
@@ -917,6 +962,93 @@ export class ReviewComponent {
     this.editor.setText("");
     this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
+  }
+
+  private startSearchMode(): void {
+    this.searchMode = true;
+    this.draftSearchQuery = this.searchQuery;
+    this.searchMessage = "";
+    this.tui.requestRender();
+  }
+
+  private handleSearchInput(data: string): void {
+    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+      this.searchMode = false;
+      this.draftSearchQuery = "";
+      this.tui.requestRender();
+      return;
+    }
+
+    if (matchesKey(data, "enter")) {
+      const query = this.draftSearchQuery.trim();
+      this.searchMode = false;
+      this.draftSearchQuery = "";
+      this.searchQuery = query;
+      this.searchMessage = "";
+      if (query) {
+        this.jumpSearch(1);
+      } else {
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    if (matchesKey(data, "ctrl+u")) {
+      this.draftSearchQuery = "";
+      this.tui.requestRender();
+      return;
+    }
+
+    if (matchesKey(data, "backspace") || data === "\u007f" || data === "\b") {
+      this.draftSearchQuery = this.draftSearchQuery.slice(0, -1);
+      this.tui.requestRender();
+      return;
+    }
+
+    if (data.length === 1 && data >= " " && data !== "\u007f") {
+      this.draftSearchQuery += data;
+      this.tui.requestRender();
+    }
+  }
+
+  private clearSearch(): void {
+    this.searchMode = false;
+    this.searchQuery = "";
+    this.draftSearchQuery = "";
+    this.searchMessage = "";
+    this.tui.requestRender();
+  }
+
+  private jumpSearch(direction: 1 | -1): void {
+    const query = this.searchQuery.trim();
+    if (!query) return;
+
+    const matches = this.getSearchMatchIndexes(query);
+    if (matches.length === 0) {
+      this.searchMessage = `No matches for /${query}`;
+      this.tui.requestRender();
+      return;
+    }
+
+    this.searchMessage = "";
+    const current =
+      direction === 1
+        ? matches.find((index) => index > this.selected)
+        : [...matches].reverse().find((index) => index < this.selected);
+    this.selected =
+      current ?? (direction === 1 ? matches[0]! : matches[matches.length - 1]!);
+    this.tui.requestRender();
+  }
+
+  private getSearchMatchIndexes(query: string): number[] {
+    const needle = query.toLocaleLowerCase();
+    if (!needle) return [];
+
+    const matches: number[] = [];
+    this.lines.forEach((line, index) => {
+      if (line.text.toLocaleLowerCase().includes(needle)) matches.push(index);
+    });
+    return matches;
   }
 
   private getSplitDiffRows(): SplitDiffRow[] {
