@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import type { DiffSource } from "./types.ts";
+import type { DiffSource } from "../review/types.ts";
 
 export function parseDiffSource(args: string): DiffSource {
   const trimmed = args.trim();

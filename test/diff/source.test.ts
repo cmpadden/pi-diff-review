@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { getDiff, parseDiffSource } from "../src/diff-source.ts";
+import { getDiff, parseDiffSource } from "../../src/diff/source.ts";
 
 describe("parseDiffSource", () => {
   it("defaults to the unstaged git diff", () => {

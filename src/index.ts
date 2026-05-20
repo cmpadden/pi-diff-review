@@ -3,12 +3,16 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { getDiff, parseDiffSource } from "./diff-source.ts";
-import { parseDiff } from "./diff-parser.ts";
-import { PiModelDiffExplainer } from "./explain.ts";
-import { buildReviewPrompt } from "./prompt.ts";
-import { ReviewComponent } from "./review-component.ts";
-import type { DiffSource, ReviewComment, ReviewResult } from "./types.ts";
+import { getDiff, parseDiffSource } from "./diff/source.ts";
+import { parseDiff } from "./diff/parser.ts";
+import { PiModelDiffExplainer } from "./explanation/explainer.ts";
+import { buildReviewPrompt } from "./review/prompt.ts";
+import { ReviewComponent } from "./review/component.ts";
+import type {
+  DiffSource,
+  ReviewComment,
+  ReviewResult,
+} from "./review/types.ts";
 
 const DIFF_REVIEW_CACHE_ENTRY = "pi-diff-review-cache";
 const DIFF_REVIEW_EXPLANATION_CACHE_ENTRY = "pi-diff-review-explanation-cache";

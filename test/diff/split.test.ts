@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildSplitDiffRows } from "../src/split-diff.ts";
-import type { ReviewLine } from "../src/types.ts";
+import { buildSplitDiffRows } from "../../src/diff/split.ts";
+import type { ReviewLine } from "../../src/review/types.ts";
 
 function line(id: string, kind: ReviewLine["kind"], text = id): ReviewLine {
   return { id, kind, text, commentable: kind !== "meta" && kind !== "hunk" };

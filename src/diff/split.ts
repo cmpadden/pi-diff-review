@@ -1,4 +1,8 @@
-import type { ReviewLine, SplitDiffCell, SplitDiffRow } from "./types.ts";
+import type {
+  ReviewLine,
+  SplitDiffCell,
+  SplitDiffRow,
+} from "../review/types.ts";
 
 export type SplitDiffRowsResult = {
   rows: SplitDiffRow[];

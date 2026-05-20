@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildReviewPrompt, formatLocation } from "../src/prompt.ts";
-import type { ReviewComment } from "../src/types.ts";
+import { buildReviewPrompt, formatLocation } from "../../src/review/prompt.ts";
+import type { ReviewComment } from "../../src/review/types.ts";
 
 describe("formatLocation", () => {
   it("formats new, old, and unchanged line locations", () => {
