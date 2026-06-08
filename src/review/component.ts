@@ -51,11 +51,32 @@ type AnnotatedDiffRow =
   | { kind: "split"; splitRowIndex: number }
   | InlineBoxRow;
 
+const HELP_COMMANDS = [
+  ["h", "show or hide this help"],
+  ["j/k or arrows", "move selection"],
+  ["ctrl-u / ctrl-d", "move up or down half a page"],
+  ["g / G", "jump to top or bottom"],
+  ["n / p", "jump to next or previous hunk"],
+  ["/", "search diff lines"],
+  ["n / N", "jump between search matches"],
+  ["J / K", "extend highlighted selection"],
+  ["c", "add or edit a line or range comment"],
+  ["C", "add or edit an overall diff comment"],
+  ["x", "delete the current line or range comment"],
+  ["t", "toggle inline comments and explanations"],
+  ["v", "toggle unified or split rendering"],
+  ["?", "toggle AI explanation for current hunk"],
+  ["Enter", "submit comments, save edits, or jump to search result"],
+  ["Esc", "close help, cancel search/edit, clear selection, or exit"],
+  ["q", "exit review"],
+] as const;
+
 export class ReviewComponent {
   private navigation: ReviewNavigationState;
   private editMode = false;
   private editingCommentKey?: string;
   private search: ReviewSearchState;
+  private helpVisible = false;
 
   private inlineAnnotationsVisible = true;
   private visibleExplanationKeys = new Set<string>();
@@ -171,6 +192,13 @@ export class ReviewComponent {
   }
 
   handleInput(data: string): void {
+    if (this.helpVisible) {
+      if (data === "h" || matchesKey(data, "escape")) {
+        this.toggleHelp();
+      }
+      return;
+    }
+
     if (this.editMode) {
       if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
         this.exitEditMode();
@@ -199,6 +227,10 @@ export class ReviewComponent {
     }
     if (data === "q") {
       this.done({ action: "cancel" });
+      return;
+    }
+    if (data === "h") {
+      this.toggleHelp();
       return;
     }
     if (data === "t") {
@@ -292,15 +324,9 @@ export class ReviewComponent {
     const output: string[] = [];
 
     output.push(
-      truncateToWidth(
-        this.theme.fg(
-          "dim",
-          this.editMode
-            ? `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • editing inline comment • Enter save • Esc/Ctrl+C cancel`
-            : this.hasSelection()
-              ? `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • J/K extend • Esc clear selection • c comment range • C overall comment • Enter submit`
-              : `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments • ${this.getPositionText(selectedLine)} • inline ${this.inlineAnnotationsVisible ? "shown" : "hidden"} • j/k move • g/G top/bottom • ctrl-u/d page • / search • t annotations • v unified/split • ? explain • J/K extend • c comment • C overall • x delete • ${this.search.query ? "n/N search" : "n/p hunk"} • Enter submit • q quit`,
-        ),
+      this.renderStatusLine(
+        this.getHeaderText(selectedLine),
+        "Press h for help",
         width,
       ),
     );
@@ -314,7 +340,130 @@ export class ReviewComponent {
         width,
       ),
     );
+    return this.helpVisible ? this.renderHelpModal(output, width) : output;
+  }
+
+  private getHeaderText(selectedLine?: ReviewLine): string {
+    const base = `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments`;
+
+    if (this.editMode) {
+      return `${base} • editing ${this.editingCommentKey === GLOBAL_COMMENT_KEY ? "overall comment" : "inline comment"}`;
+    }
+
+    if (this.hasSelection()) {
+      return `${base} • selection active`;
+    }
+
+    return `${base} • ${this.getPositionText(selectedLine)} • inline ${this.inlineAnnotationsVisible ? "shown" : "hidden"} • ${this.diffRenderMode}`;
+  }
+
+  private renderStatusLine(left: string, right: string, width: number): string {
+    const styledLeft = this.theme.fg("dim", left);
+    const styledRight = this.theme.fg("muted", right);
+    const rightWidth = visibleWidth(styledRight);
+    const leftWidth = Math.max(0, width - rightWidth - 1);
+    const truncatedLeft = truncateToWidth(styledLeft, leftWidth);
+    const spacer = Math.max(
+      1,
+      width - visibleWidth(truncatedLeft) - rightWidth,
+    );
+    return truncateToWidth(
+      `${truncatedLeft}${" ".repeat(spacer)}${styledRight}`,
+      width,
+    );
+  }
+
+  private renderHelpModal(rows: string[], width: number): string[] {
+    if (rows.length === 0 || width < 8) return rows;
+
+    const modalWidth = Math.max(8, Math.min(72, width - 2));
+    const contentWidth = Math.max(4, modalWidth - 4);
+    const keyWidth = Math.min(16, Math.max(8, Math.floor(contentWidth * 0.35)));
+    const modalRows = this.buildHelpModalRows(
+      modalWidth,
+      contentWidth,
+      keyWidth,
+    );
+    const maxRows = Math.max(1, rows.length - 2);
+    const visibleModalRows =
+      modalRows.length > maxRows
+        ? [
+            ...modalRows.slice(0, maxRows - 1),
+            this.renderModalRow(
+              this.theme.fg("dim", "More commands available on taller screens"),
+              contentWidth,
+            ),
+          ]
+        : modalRows;
+    const top = Math.max(
+      1,
+      Math.floor((rows.length - visibleModalRows.length) / 2),
+    );
+    const left = Math.max(0, Math.floor((width - modalWidth) / 2));
+
+    const output = [...rows];
+    for (let index = 0; index < visibleModalRows.length; index++) {
+      const row = visibleModalRows[index]!;
+      output[top + index] = padToWidth(
+        truncateToWidth(`${" ".repeat(left)}${row}`, width),
+        width,
+      );
+    }
     return output;
+  }
+
+  private buildHelpModalRows(
+    modalWidth: number,
+    contentWidth: number,
+    keyWidth: number,
+  ): string[] {
+    const rows = [
+      this.renderModalHorizontal(" Help ", modalWidth, "top"),
+      this.renderModalRow(
+        this.theme.fg("dim", "Press h or Esc to close."),
+        contentWidth,
+      ),
+      this.renderModalRow("", contentWidth),
+    ];
+
+    for (const [keys, description] of HELP_COMMANDS) {
+      const keyCell = padToWidth(
+        truncateToWidth(this.theme.fg("accent", keys), keyWidth),
+        keyWidth,
+      );
+      rows.push(
+        this.renderModalRow(
+          `${keyCell} ${this.theme.fg("text", description)}`,
+          contentWidth,
+        ),
+      );
+    }
+
+    rows.push(this.renderModalHorizontal("", modalWidth, "bottom"));
+    return rows;
+  }
+
+  private renderModalRow(text: string, contentWidth: number): string {
+    return `${this.theme.fg("borderMuted", "│")} ${padToWidth(
+      truncateToWidth(text, contentWidth),
+      contentWidth,
+    )} ${this.theme.fg("borderMuted", "│")}`;
+  }
+
+  private renderModalHorizontal(
+    title: string,
+    width: number,
+    part: "top" | "bottom",
+  ): string {
+    const contentWidth = Math.max(0, width - 2);
+    const visibleTitle = truncateToWidth(title, contentWidth);
+    const remaining = Math.max(0, contentWidth - visibleWidth(visibleTitle));
+    const left = part === "top" ? "╭" : "╰";
+    const right = part === "top" ? "╮" : "╯";
+    return `${this.theme.fg("borderMuted", left)}${visibleTitle}${this.theme.fg(
+      "borderMuted",
+      "─".repeat(remaining),
+    )}${this.theme.fg("borderMuted", right)}`;
   }
 
   private renderAnnotatedDiffRows(width: number, height: number): string[] {
@@ -763,6 +912,11 @@ export class ReviewComponent {
   private toggleInlineAnnotations(): void {
     this.inlineAnnotationsVisible = !this.inlineAnnotationsVisible;
     this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
+  }
+
+  private toggleHelp(): void {
+    this.helpVisible = !this.helpVisible;
     this.tui.requestRender(true);
   }
 
