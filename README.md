@@ -62,6 +62,7 @@ Review a branch or commit range by passing any `git diff` arguments after `/diff
 - `/diff --cached` reviews staged changes
 - `/diff main...HEAD` reviews changes on the current branch relative to `main`
 - `/diff <git-diff-args>` passes arguments through to `git diff`
+- `h` toggles the command help modal
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
