@@ -1019,11 +1019,13 @@ export class ReviewComponent {
   }
 
   private getDisplayText(line: ReviewLine): string {
-    return line.kind === "add" ||
+    const raw =
+      line.kind === "add" ||
       line.kind === "remove" ||
       line.kind === "context"
-      ? line.text.slice(1)
-      : line.text;
+        ? line.text.slice(1)
+        : line.text;
+    return expandTabs(raw);
   }
 
   private applyDiffBackground(
@@ -1104,4 +1106,20 @@ export class ReviewComponent {
   private getCurrentHunkScope() {
     return getCurrentHunkScope(this.lines, this.selected);
   }
+}
+
+function expandTabs(text: string, tabSize = 4): string {
+  let result = "";
+  let col = 0;
+  for (const char of text) {
+    if (char === "\t") {
+      const spaces = tabSize - (col % tabSize);
+      result += " ".repeat(spaces);
+      col += spaces;
+    } else {
+      result += char;
+      col++;
+    }
+  }
+  return result;
 }
