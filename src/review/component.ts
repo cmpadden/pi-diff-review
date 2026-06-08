@@ -1020,9 +1020,7 @@ export class ReviewComponent {
 
   private getDisplayText(line: ReviewLine): string {
     const raw =
-      line.kind === "add" ||
-      line.kind === "remove" ||
-      line.kind === "context"
+      line.kind === "add" || line.kind === "remove" || line.kind === "context"
         ? line.text.slice(1)
         : line.text;
     return expandTabs(raw);
