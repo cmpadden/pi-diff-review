@@ -9,7 +9,11 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { DiffExplainer, ExplanationScope, ExplanationState } from "../explanation/explainer.ts";
+import type {
+  DiffExplainer,
+  ExplanationScope,
+  ExplanationState,
+} from "../explanation/explainer.ts";
 import {
   GLOBAL_COMMENT_KEY,
   buildCommentFromSelection,
@@ -776,7 +780,12 @@ export class ReviewComponent {
         " 💬 Answer ",
       );
     } else if (state.status === "error") {
-      this.pushExplanationBlock(rows, `Failed: ${state.message}`, width, " 💬 Answer ");
+      this.pushExplanationBlock(
+        rows,
+        `Failed: ${state.message}`,
+        width,
+        " 💬 Answer ",
+      );
     } else {
       this.pushExplanationBlock(rows, state.text, width, " 💬 Answer ");
     }
@@ -1263,9 +1272,20 @@ export class ReviewComponent {
   private ensureScroll(viewportHeight: number, width: number): void {
     this.navigation.ensureScroll(
       viewportHeight,
-      this.getSelectedDisplayRow(width),
+      this.getScrollTargetDisplayRow(width),
       this.getDisplayRowCount(width),
     );
+  }
+
+  private getScrollTargetDisplayRow(width: number): number {
+    if (this.editMode || this.askInputMode) {
+      const editorRow = this.getAnnotatedRows(width).findIndex(
+        (row) => row.kind === "editor",
+      );
+      if (editorRow >= 0) return editorRow;
+    }
+
+    return this.getSelectedDisplayRow(width);
   }
 
   private getDisplayText(line: ReviewLine): string {

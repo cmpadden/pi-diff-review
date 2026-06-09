@@ -104,12 +104,18 @@ export class ExplanationController {
       })
       .then((finalText) => {
         if (requestId !== this.askRequestId) return;
-        this.askState = { status: "ready", text: finalText.trim() || text.trim() || "No answer returned." };
+        this.askState = {
+          status: "ready",
+          text: finalText.trim() || text.trim() || "No answer returned.",
+        };
       })
       .catch((error) => {
         if (requestId !== this.askRequestId) return;
         if (controller.signal.aborted) return;
-        this.askState = { status: "error", message: error instanceof Error ? error.message : String(error) };
+        this.askState = {
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        };
       })
       .finally(() => {
         if (requestId !== this.askRequestId) return;

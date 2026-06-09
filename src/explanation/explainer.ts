@@ -26,7 +26,10 @@ export type DiffExplainer = {
   ): Promise<string>;
 };
 
-export function buildAskPrompt(scope: ExplanationScope, question: string): string {
+export function buildAskPrompt(
+  scope: ExplanationScope,
+  question: string,
+): string {
   return `Given this git diff hunk:\n\`\`\`diff\n${scope.diffText}\n\`\`\`\n\n${question}`;
 }
 
@@ -73,7 +76,9 @@ export class PiModelDiffExplainer implements DiffExplainer {
       messages: [
         {
           role: "user",
-          content: question ? buildAskPrompt(scope, question) : buildExplanationPrompt(scope),
+          content: question
+            ? buildAskPrompt(scope, question)
+            : buildExplanationPrompt(scope),
           timestamp: Date.now(),
         },
       ],
