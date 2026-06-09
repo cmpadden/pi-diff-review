@@ -49,6 +49,9 @@ export class ExplanationController {
   readonly explanations = new Map<string, ExplanationState>();
   private abortController?: AbortController;
   private requestId = 0;
+  private askState: ExplanationState | undefined;
+  private askAbortController?: AbortController;
+  private askRequestId = 0;
   private loadingFrame = 0;
   private loadingTimer?: ReturnType<typeof setInterval>;
 
@@ -79,6 +82,54 @@ export class ExplanationController {
     return LOADING_FRAMES[this.loadingFrame % LOADING_FRAMES.length] ?? "⠋";
   }
 
+  ask(scope: ExplanationScope, question: string): void {
+    if (!this.explainer) return;
+    this.askAbortController?.abort();
+    const controller = new AbortController();
+    this.askAbortController = controller;
+    const requestId = ++this.askRequestId;
+    let text = "";
+    this.askState = { status: "loading", text };
+    this.startLoadingTimer();
+
+    void this.explainer
+      .explain(scope, question, {
+        signal: controller.signal,
+        onDelta: (delta) => {
+          if (requestId !== this.askRequestId) return;
+          text += delta;
+          this.askState = { status: "loading", text };
+          this.tui.requestRender();
+        },
+      })
+      .then((finalText) => {
+        if (requestId !== this.askRequestId) return;
+        this.askState = { status: "ready", text: finalText.trim() || text.trim() || "No answer returned." };
+      })
+      .catch((error) => {
+        if (requestId !== this.askRequestId) return;
+        if (controller.signal.aborted) return;
+        this.askState = { status: "error", message: error instanceof Error ? error.message : String(error) };
+      })
+      .finally(() => {
+        if (requestId !== this.askRequestId) return;
+        this.stopLoadingTimerIfIdle();
+        this.tui.requestRender();
+      });
+
+    this.tui.requestRender();
+  }
+
+  getAskState(): ExplanationState | undefined {
+    return this.askState;
+  }
+
+  clearAsk(): void {
+    this.askAbortController?.abort();
+    this.askAbortController = undefined;
+    this.askState = undefined;
+  }
+
   ensure(scope: ExplanationScope | undefined): void {
     if (!scope || !this.explainer) return;
     if (this.explanations.has(scope.key)) return;
@@ -93,7 +144,7 @@ export class ExplanationController {
     this.startLoadingTimer();
 
     void this.explainer
-      .explain(scope, {
+      .explain(scope, undefined, {
         signal: controller.signal,
         onDelta: (delta) => {
           if (requestId !== this.requestId) return;
@@ -129,6 +180,7 @@ export class ExplanationController {
 
   dispose(): void {
     this.abortController?.abort();
+    this.askAbortController?.abort();
     this.stopLoadingTimer();
   }
 
@@ -153,9 +205,9 @@ export class ExplanationController {
   }
 
   private stopLoadingTimerIfIdle(): void {
-    const hasLoading = [...this.explanations.values()].some(
-      (explanation) => explanation.status === "loading",
-    );
+    const hasLoading =
+      [...this.explanations.values()].some((e) => e.status === "loading") ||
+      this.askState?.status === "loading";
     if (!hasLoading) this.stopLoadingTimer();
   }
 

@@ -18,12 +18,17 @@ export type ExplanationState =
 export type DiffExplainer = {
   explain(
     scope: ExplanationScope,
+    question?: string,
     options?: {
       signal?: AbortSignal;
       onDelta?: (delta: string) => void;
     },
   ): Promise<string>;
 };
+
+export function buildAskPrompt(scope: ExplanationScope, question: string): string {
+  return `Given this git diff hunk:\n\`\`\`diff\n${scope.diffText}\n\`\`\`\n\n${question}`;
+}
 
 export function buildExplanationPrompt(scope: ExplanationScope): string {
   return `Explain this git diff hunk for a code reviewer.
@@ -46,6 +51,7 @@ export class PiModelDiffExplainer implements DiffExplainer {
 
   async explain(
     scope: ExplanationScope,
+    question?: string,
     options: {
       signal?: AbortSignal;
       onDelta?: (delta: string) => void;
@@ -67,7 +73,7 @@ export class PiModelDiffExplainer implements DiffExplainer {
       messages: [
         {
           role: "user",
-          content: buildExplanationPrompt(scope),
+          content: question ? buildAskPrompt(scope, question) : buildExplanationPrompt(scope),
           timestamp: Date.now(),
         },
       ],
