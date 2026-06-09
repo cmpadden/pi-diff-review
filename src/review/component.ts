@@ -9,7 +9,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { DiffExplainer } from "../explanation/explainer.ts";
+import type { DiffExplainer, ExplanationScope, ExplanationState } from "../explanation/explainer.ts";
 import {
   GLOBAL_COMMENT_KEY,
   buildCommentFromSelection,
@@ -66,6 +66,7 @@ const HELP_COMMANDS = [
   ["t", "toggle inline comments and explanations"],
   ["v", "toggle unified or split rendering"],
   ["?", "toggle AI explanation for current hunk"],
+  ["a", "ask a question about the current hunk"],
   ["Enter", "submit comments, save edits, or jump to search result"],
   ["Esc", "close help, cancel search/edit, clear selection, or exit"],
   ["q", "exit review"],
@@ -80,6 +81,8 @@ export class ReviewComponent {
 
   private inlineAnnotationsVisible = true;
   private visibleExplanationKeys = new Set<string>();
+  private askInputMode = false;
+  private askScope?: ExplanationScope;
   private explanationController: ExplanationController;
   private editor: Editor;
   private splitRows?: SplitDiffRow[];
@@ -136,6 +139,19 @@ export class ReviewComponent {
     });
 
     this.editor.onSubmit = (value) => {
+      if (this.askInputMode) {
+        this.askInputMode = false;
+        this.editor.setText("");
+        const question = value.trim();
+        if (question && this.askScope) {
+          this.explanationController.ask(this.askScope, question);
+        } else {
+          this.askScope = undefined;
+        }
+        this.invalidateAnnotatedRows();
+        this.tui.requestRender(true);
+        return;
+      }
       const trimmed = value.trim();
       if (this.editingCommentKey === GLOBAL_COMMENT_KEY) {
         if (!trimmed) {
@@ -210,13 +226,26 @@ export class ReviewComponent {
       return;
     }
 
+    if (this.askInputMode) {
+      if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+        this.exitAskInputMode();
+        return;
+      }
+      this.editor.handleInput(data);
+      this.invalidateAnnotatedRows();
+      this.tui.requestRender();
+      return;
+    }
+
     if (this.search.mode) {
       this.handleSearchInput(data);
       return;
     }
 
     if (matchesKey(data, "escape")) {
-      if (this.search.query) {
+      if (this.askScope) {
+        this.clearAsk();
+      } else if (this.search.query) {
         this.clearSearch();
       } else if (this.hasSelection()) {
         this.clearSelection();
@@ -243,6 +272,10 @@ export class ReviewComponent {
     }
     if (data === "?") {
       this.toggleExplanationPane();
+      return;
+    }
+    if (data === "a") {
+      this.startAskMode();
       return;
     }
     if (data === "/") {
@@ -515,7 +548,9 @@ export class ReviewComponent {
         this.inlineAnnotationsVisible &&
       this.annotatedRowsVisibleExplanationCount ===
         this.visibleExplanationKeys.size &&
-      this.visibleExplanationKeys.size === 0
+      this.visibleExplanationKeys.size === 0 &&
+      !this.askInputMode &&
+      !this.askScope
     ) {
       return this.annotatedRows;
     }
@@ -659,30 +694,41 @@ export class ReviewComponent {
     width: number,
   ): void {
     const scope = getCurrentHunkScope(this.lines, lineIndex);
-    if (!scope || !this.visibleExplanationKeys.has(scope.key)) return;
+    if (!scope) return;
 
     const end = this.getHunkEndIndex(lineIndex);
     if (end !== lineIndex) return;
 
-    const explanation = this.explanationController.getState(scope);
-    if (!this.explanationController.isAvailable) {
-      this.pushExplanationBlock(rows, "Explanation unavailable.", width);
-    } else if (!explanation) {
-      this.pushExplanationBlock(rows, "No explanation generated yet.", width);
-    } else if (explanation.status === "loading") {
-      this.pushExplanationBlock(
-        rows,
-        `${this.explanationController.getLoadingFrame()} ${explanation.text || "Generating explanation..."}`,
-        width,
-      );
-    } else if (explanation.status === "error") {
-      this.pushExplanationBlock(
-        rows,
-        `Explanation failed: ${explanation.message}`,
-        width,
-      );
-    } else {
-      this.pushExplanationBlock(rows, explanation.text, width);
+    if (this.visibleExplanationKeys.has(scope.key)) {
+      const explanation = this.explanationController.getState(scope);
+      if (!this.explanationController.isAvailable) {
+        this.pushExplanationBlock(rows, "Explanation unavailable.", width);
+      } else if (!explanation) {
+        this.pushExplanationBlock(rows, "No explanation generated yet.", width);
+      } else if (explanation.status === "loading") {
+        this.pushExplanationBlock(
+          rows,
+          `${this.explanationController.getLoadingFrame()} ${explanation.text || "Generating explanation..."}`,
+          width,
+        );
+      } else if (explanation.status === "error") {
+        this.pushExplanationBlock(
+          rows,
+          `Explanation failed: ${explanation.message}`,
+          width,
+        );
+      } else {
+        this.pushExplanationBlock(rows, explanation.text, width);
+      }
+    }
+
+    if (this.askInputMode && this.askScope?.key === scope.key) {
+      this.pushInlineEditorBlock(rows, "Ask about this hunk", width);
+    }
+
+    if (!this.askInputMode && this.askScope?.key === scope.key) {
+      const askState = this.explanationController.getAskState();
+      if (askState) this.pushAskBlock(rows, askState, width);
     }
   }
 
@@ -717,14 +763,34 @@ export class ReviewComponent {
     rows.push({ kind: "comment", text: "", part: "bottom" });
   }
 
+  private pushAskBlock(
+    rows: AnnotatedDiffRow[],
+    state: ExplanationState,
+    width: number,
+  ): void {
+    if (state.status === "loading") {
+      this.pushExplanationBlock(
+        rows,
+        `${this.explanationController.getLoadingFrame()} ${state.text || "Generating answer..."}`,
+        width,
+        " 💬 Answer ",
+      );
+    } else if (state.status === "error") {
+      this.pushExplanationBlock(rows, `Failed: ${state.message}`, width, " 💬 Answer ");
+    } else {
+      this.pushExplanationBlock(rows, state.text, width, " 💬 Answer ");
+    }
+  }
+
   private pushExplanationBlock(
     rows: AnnotatedDiffRow[],
     text: string,
     width: number,
+    title = " ✨ Explanation ",
   ): void {
     rows.push({
       kind: "explanation",
-      text: this.theme.fg("accent", " ✨ Explanation "),
+      text: this.theme.fg("accent", title),
       part: "top",
     });
     const wrapped = wrapTextWithAnsi(
@@ -891,6 +957,36 @@ export class ReviewComponent {
 
   dispose(): void {
     this.explanationController.dispose();
+    this.clearAsk();
+  }
+
+  private startAskMode(): void {
+    const scope = this.getCurrentHunkScope();
+    if (!scope) return;
+    this.clearAsk();
+    this.askScope = scope;
+    this.askInputMode = true;
+    this.inlineAnnotationsVisible = true;
+    this.editor.setText("");
+    this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
+  }
+
+  private exitAskInputMode(): void {
+    this.askInputMode = false;
+    this.editor.setText("");
+    if (!this.explanationController.getAskState()) this.askScope = undefined;
+    this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
+  }
+
+  private clearAsk(): void {
+    this.askInputMode = false;
+    this.askScope = undefined;
+    this.explanationController.clearAsk();
+    this.editor.setText("");
+    this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
   }
 
   private move(delta: number): void {

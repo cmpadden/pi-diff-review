@@ -82,7 +82,7 @@ describe("ExplanationController", () => {
   it("emits ready explanations after generation finishes", async () => {
     let changed: Map<string, string> | undefined;
     const explainer: DiffExplainer = {
-      async explain(_scope, options) {
+      async explain(_scope, _question, options) {
         options?.onDelta?.("partial ");
         return "final explanation";
       },
