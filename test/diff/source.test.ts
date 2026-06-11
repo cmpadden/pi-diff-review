@@ -51,6 +51,7 @@ describe("getDiff", () => {
         cwd,
       });
       execFileSync("git", ["config", "user.name", "Test User"], { cwd });
+      execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd });
       writeFileSync(join(cwd, "example.txt"), "before\n");
       execFileSync("git", ["add", "example.txt"], { cwd });
       execFileSync("git", ["commit", "-m", "initial"], {

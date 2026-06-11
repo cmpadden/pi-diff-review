@@ -42,6 +42,12 @@ export type DiffSource = {
   args: string[];
 };
 
+export type PersistedAsk = {
+  scopeKey: string;
+  anchorLineId: string;
+  text: string;
+};
+
 export type DiffRenderMode = "unified" | "split";
 
 export type SplitDiffCell = {
