@@ -58,6 +58,7 @@ type AnnotatedDiffRow =
 const HELP_COMMANDS = [
   ["h", "show or hide this help"],
   ["j/k or arrows", "move selection"],
+  ["PgUp / PgDown", "move up or down half a page"],
   ["ctrl-u / ctrl-d", "move up or down half a page"],
   ["g / G", "jump to top or bottom"],
   ["n / p", "jump to next or previous hunk"],
@@ -286,11 +287,11 @@ export class ReviewComponent {
       this.startSearchMode();
       return;
     }
-    if (matchesKey(data, "ctrl+d")) {
+    if (matchesKey(data, "pageDown") || matchesKey(data, "ctrl+d")) {
       this.move(this.getPageMoveAmount());
       return;
     }
-    if (matchesKey(data, "ctrl+u")) {
+    if (matchesKey(data, "pageUp") || matchesKey(data, "ctrl+u")) {
       this.move(-this.getPageMoveAmount());
       return;
     }
