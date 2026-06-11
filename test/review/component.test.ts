@@ -28,7 +28,9 @@ function createComponent(
     explainer?: DiffExplainer;
     cachedAsk?: PersistedAsk;
     onAskChanged?: (ask?: PersistedAsk) => void;
-    done?: (result: { action: "submit"; comments: any[] } | { action: "cancel" }) => void;
+    done?: (
+      result: { action: "submit"; comments: any[] } | { action: "cancel" },
+    ) => void;
   } = {},
 ): ReviewComponent {
   const tui: ReviewTui = {
@@ -75,9 +77,13 @@ describe("ReviewComponent", () => {
     component.handleInput("a");
     const output = component.render(100);
 
-    const selectedLineRow = output.findIndex((line) => line.includes(" line 1"));
+    const selectedLineRow = output.findIndex((line) =>
+      line.includes(" line 1"),
+    );
     const nextLineRow = output.findIndex((line) => line.includes(" line 2"));
-    const askRow = output.findIndex((line) => line.includes("Ask about this hunk"));
+    const askRow = output.findIndex((line) =>
+      line.includes("Ask about this hunk"),
+    );
 
     assert.ok(selectedLineRow >= 0);
     assert.ok(askRow > selectedLineRow);
@@ -91,7 +97,9 @@ describe("ReviewComponent", () => {
     component.handleInput("?");
     const output = component.render(100);
 
-    const selectedLineRow = output.findIndex((line) => line.includes(" line 1"));
+    const selectedLineRow = output.findIndex((line) =>
+      line.includes(" line 1"),
+    );
     const nextLineRow = output.findIndex((line) => line.includes(" line 2"));
     const explanationRow = output.findIndex((line) =>
       line.includes("✨ Explanation"),
@@ -115,7 +123,9 @@ describe("ReviewComponent", () => {
     (component as any).selected = 2;
     const output = component.render(100);
 
-    const originalLineRow = output.findIndex((line) => line.includes(" line 1"));
+    const originalLineRow = output.findIndex((line) =>
+      line.includes(" line 1"),
+    );
     const movedToLineRow = output.findIndex((line) => line.includes(" line 2"));
     const answerRow = output.findIndex((line) => line.includes("💬 Answer"));
 
@@ -131,7 +141,9 @@ describe("ReviewComponent", () => {
     (component as any).selected = 2;
     const output = component.render(100);
 
-    const originalLineRow = output.findIndex((line) => line.includes(" line 1"));
+    const originalLineRow = output.findIndex((line) =>
+      line.includes(" line 1"),
+    );
     const movedToLineRow = output.findIndex((line) => line.includes(" line 2"));
     const explanationRow = output.findIndex((line) =>
       line.includes("✨ Explanation"),
@@ -179,7 +191,10 @@ describe("ReviewComponent", () => {
   });
 
   it("q clears an active selection before exiting", () => {
-    let result: { action: "submit"; comments: any[] } | { action: "cancel" } | undefined;
+    let result:
+      | { action: "submit"; comments: any[] }
+      | { action: "cancel" }
+      | undefined;
     const component = createComponent(buildLines(6), {
       done: (next) => {
         result = next;

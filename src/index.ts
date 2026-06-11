@@ -148,7 +148,10 @@ function getCachedAsk(
 ): PersistedAsk | undefined {
   let latest: DiffAskCacheEntry | undefined;
   for (const entry of ctx.sessionManager.getEntries()) {
-    if (entry.type !== "custom" || entry.customType !== DIFF_REVIEW_ASK_CACHE_ENTRY) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== DIFF_REVIEW_ASK_CACHE_ENTRY
+    ) {
       continue;
     }
 

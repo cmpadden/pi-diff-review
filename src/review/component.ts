@@ -993,7 +993,8 @@ export class ReviewComponent {
     scopeKey: string,
   ): number | undefined {
     return (
-      this.explanationAnchorByScope.get(scopeKey) ?? this.getHunkEndIndex(lineIndex)
+      this.explanationAnchorByScope.get(scopeKey) ??
+      this.getHunkEndIndex(lineIndex)
     );
   }
 
