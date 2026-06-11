@@ -62,11 +62,18 @@ export class ExplanationController {
     private readonly onExplanationsChanged?: (
       explanations: Map<string, string>,
     ) => void,
+    cachedAskText?: string,
+    private readonly onAskChanged?: (state?: ExplanationState) => void,
   ) {
     for (const [key, text] of cachedExplanations) {
       const trimmed = text.trim();
       if (trimmed)
         this.explanations.set(key, { status: "ready", text: trimmed });
+    }
+
+    const trimmedAskText = cachedAskText?.trim();
+    if (trimmedAskText) {
+      this.askState = { status: "ready", text: trimmedAskText };
     }
   }
 
@@ -90,6 +97,7 @@ export class ExplanationController {
     const requestId = ++this.askRequestId;
     let text = "";
     this.askState = { status: "loading", text };
+    this.onAskChanged?.(this.askState);
     this.startLoadingTimer();
 
     void this.explainer
@@ -99,6 +107,7 @@ export class ExplanationController {
           if (requestId !== this.askRequestId) return;
           text += delta;
           this.askState = { status: "loading", text };
+          this.onAskChanged?.(this.askState);
           this.tui.requestRender();
         },
       })
@@ -108,6 +117,7 @@ export class ExplanationController {
           status: "ready",
           text: finalText.trim() || text.trim() || "No answer returned.",
         };
+        this.onAskChanged?.(this.askState);
       })
       .catch((error) => {
         if (requestId !== this.askRequestId) return;
@@ -116,6 +126,7 @@ export class ExplanationController {
           status: "error",
           message: error instanceof Error ? error.message : String(error),
         };
+        this.onAskChanged?.(this.askState);
       })
       .finally(() => {
         if (requestId !== this.askRequestId) return;
@@ -134,6 +145,7 @@ export class ExplanationController {
     this.askAbortController?.abort();
     this.askAbortController = undefined;
     this.askState = undefined;
+    this.onAskChanged?.(undefined);
   }
 
   ensure(scope: ExplanationScope | undefined): void {

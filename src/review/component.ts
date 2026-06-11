@@ -32,6 +32,7 @@ import { padToWidth, lineNumberCell } from "../render/utils.ts";
 import { buildSplitDiffRows } from "../diff/split.ts";
 import type {
   DiffRenderMode,
+  PersistedAsk,
   ReviewComment,
   ReviewLine,
   ReviewResult,
@@ -86,8 +87,10 @@ export class ReviewComponent {
 
   private inlineAnnotationsVisible = true;
   private visibleExplanationKeys = new Set<string>();
+  private explanationAnchorByScope = new Map<string, number>();
   private askInputMode = false;
   private askScope?: ExplanationScope;
+  private askAnchorIndex?: number;
   private explanationController: ExplanationController;
   private editor: Editor;
   private splitRows?: SplitDiffRow[];
@@ -117,6 +120,8 @@ export class ReviewComponent {
     private onCommentsChanged?: (comments: Map<string, ReviewComment>) => void,
     cachedExplanations?: Map<string, string>,
     private onExplanationsChanged?: (explanations: Map<string, string>) => void,
+    cachedAsk?: PersistedAsk,
+    private onAskChanged?: (ask?: PersistedAsk) => void,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.navigation = new ReviewNavigationState(
@@ -125,11 +130,36 @@ export class ReviewComponent {
     );
     this.lines.forEach((line, index) => this.lineIndexById.set(line.id, index));
     this.search = new ReviewSearchState(this.lines);
+
+    const restoredAsk = cachedAsk
+      ? this.restorePersistedAsk(cachedAsk)
+      : undefined;
+    if (restoredAsk) {
+      this.askScope = restoredAsk.scope;
+      this.askAnchorIndex = restoredAsk.anchorIndex;
+    }
+
     this.explanationController = new ExplanationController(
       tui,
       explainer,
       cachedExplanations,
       onExplanationsChanged,
+      restoredAsk ? cachedAsk?.text : undefined,
+      (state) => {
+        if (!state) {
+          this.onAskChanged?.(undefined);
+          return;
+        }
+        if (state.status !== "ready") return;
+        if (!this.askScope || this.askAnchorIndex == null) return;
+        const anchorLine = this.lines[this.askAnchorIndex];
+        if (!anchorLine) return;
+        this.onAskChanged?.({
+          scopeKey: this.askScope.key,
+          anchorLineId: anchorLine.id,
+          text: state.text,
+        });
+      },
     );
 
     this.editor = new Editor(tui as never, {
@@ -152,6 +182,7 @@ export class ReviewComponent {
           this.explanationController.ask(this.askScope, question);
         } else {
           this.askScope = undefined;
+          this.askAnchorIndex = undefined;
         }
         this.invalidateAnnotatedRows();
         this.tui.requestRender(true);
@@ -260,7 +291,11 @@ export class ReviewComponent {
       return;
     }
     if (data === "q") {
-      this.done({ action: "cancel" });
+      if (this.hasSelection()) {
+        this.clearSelection();
+      } else {
+        this.done({ action: "cancel" });
+      }
       return;
     }
     if (data === "h") {
@@ -701,10 +736,10 @@ export class ReviewComponent {
     const scope = getCurrentHunkScope(this.lines, lineIndex);
     if (!scope) return;
 
-    const end = this.getHunkEndIndex(lineIndex);
-    if (end !== lineIndex) return;
-
-    if (this.visibleExplanationKeys.has(scope.key)) {
+    if (
+      this.visibleExplanationKeys.has(scope.key) &&
+      this.getExplanationAnchorIndex(lineIndex, scope.key) === lineIndex
+    ) {
       const explanation = this.explanationController.getState(scope);
       if (!this.explanationController.isAvailable) {
         this.pushExplanationBlock(rows, "Explanation unavailable.", width);
@@ -727,11 +762,19 @@ export class ReviewComponent {
       }
     }
 
-    if (this.askInputMode && this.askScope?.key === scope.key) {
+    if (
+      this.askInputMode &&
+      this.askScope?.key === scope.key &&
+      this.askAnchorIndex === lineIndex
+    ) {
       this.pushInlineEditorBlock(rows, "Ask about this hunk", width);
     }
 
-    if (!this.askInputMode && this.askScope?.key === scope.key) {
+    if (
+      !this.askInputMode &&
+      this.askScope?.key === scope.key &&
+      this.askAnchorIndex === lineIndex
+    ) {
       const askState = this.explanationController.getAskState();
       if (askState) this.pushAskBlock(rows, askState, width);
     }
@@ -909,6 +952,27 @@ export class ReviewComponent {
     return comments.sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  private restorePersistedAsk(
+    cachedAsk: PersistedAsk,
+  ): { scope: ExplanationScope; anchorIndex: number } | undefined {
+    const anchorIndex = this.lineIndexById.get(cachedAsk.anchorLineId);
+    if (anchorIndex != null) {
+      const scope = getCurrentHunkScope(this.lines, anchorIndex);
+      if (scope?.key === cachedAsk.scopeKey) {
+        return { scope, anchorIndex };
+      }
+    }
+
+    for (let index = 0; index < this.lines.length; index++) {
+      const scope = getCurrentHunkScope(this.lines, index);
+      if (scope?.key === cachedAsk.scopeKey) {
+        return { scope, anchorIndex: index };
+      }
+    }
+
+    return undefined;
+  }
+
   private getHunkEndIndex(selected: number): number | undefined {
     const selectedLine = this.lines[selected];
     if (!selectedLine?.filePath || !selectedLine.hunkLabel) return undefined;
@@ -922,6 +986,15 @@ export class ReviewComponent {
       end++;
     }
     return end;
+  }
+
+  private getExplanationAnchorIndex(
+    lineIndex: number,
+    scopeKey: string,
+  ): number | undefined {
+    return (
+      this.explanationAnchorByScope.get(scopeKey) ?? this.getHunkEndIndex(lineIndex)
+    );
   }
 
   private renderSplitDiffRowAt(splitRowIndex: number, width: number): string {
@@ -975,6 +1048,7 @@ export class ReviewComponent {
     if (!scope) return;
     this.clearAsk();
     this.askScope = scope;
+    this.askAnchorIndex = this.selected;
     this.askInputMode = true;
     this.inlineAnnotationsVisible = true;
     this.editor.setText("");
@@ -985,7 +1059,10 @@ export class ReviewComponent {
   private exitAskInputMode(): void {
     this.askInputMode = false;
     this.editor.setText("");
-    if (!this.explanationController.getAskState()) this.askScope = undefined;
+    if (!this.explanationController.getAskState()) {
+      this.askScope = undefined;
+      this.askAnchorIndex = undefined;
+    }
     this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
@@ -993,6 +1070,7 @@ export class ReviewComponent {
   private clearAsk(): void {
     this.askInputMode = false;
     this.askScope = undefined;
+    this.askAnchorIndex = undefined;
     this.explanationController.clearAsk();
     this.editor.setText("");
     this.invalidateAnnotatedRows();
@@ -1028,6 +1106,7 @@ export class ReviewComponent {
 
   private hideInlineExplanation(): void {
     this.visibleExplanationKeys.clear();
+    this.explanationAnchorByScope.clear();
   }
 
   private toggleExplanationPane(): void {
@@ -1036,8 +1115,10 @@ export class ReviewComponent {
 
     if (this.visibleExplanationKeys.has(scope.key)) {
       this.visibleExplanationKeys.delete(scope.key);
+      this.explanationAnchorByScope.delete(scope.key);
     } else {
       this.visibleExplanationKeys.add(scope.key);
+      this.explanationAnchorByScope.set(scope.key, this.selected);
       this.ensureCurrentExplanation();
     }
 

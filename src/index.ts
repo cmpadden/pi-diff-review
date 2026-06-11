@@ -10,12 +10,14 @@ import { buildReviewPrompt } from "./review/prompt.ts";
 import { ReviewComponent } from "./review/component.ts";
 import type {
   DiffSource,
+  PersistedAsk,
   ReviewComment,
   ReviewResult,
 } from "./review/types.ts";
 
 const DIFF_REVIEW_CACHE_ENTRY = "pi-diff-review-cache";
 const DIFF_REVIEW_EXPLANATION_CACHE_ENTRY = "pi-diff-review-explanation-cache";
+const DIFF_REVIEW_ASK_CACHE_ENTRY = "pi-diff-review-ask-cache";
 
 type DiffReviewCacheEntry = {
   cacheKey: string;
@@ -26,6 +28,12 @@ type DiffReviewCacheEntry = {
 type DiffExplanationCacheEntry = {
   cacheKey: string;
   explanations: Record<string, string>;
+  updatedAt: number;
+};
+
+type DiffAskCacheEntry = {
+  cacheKey: string;
+  ask?: PersistedAsk;
   updatedAt: number;
 };
 
@@ -134,6 +142,53 @@ function persistCachedExplanations(
   } satisfies DiffExplanationCacheEntry);
 }
 
+function getCachedAsk(
+  ctx: ExtensionCommandContext,
+  cacheKey: string,
+): PersistedAsk | undefined {
+  let latest: DiffAskCacheEntry | undefined;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (entry.type !== "custom" || entry.customType !== DIFF_REVIEW_ASK_CACHE_ENTRY) {
+      continue;
+    }
+
+    const data = entry.data as Partial<DiffAskCacheEntry> | undefined;
+    if (data?.cacheKey !== cacheKey) continue;
+
+    const ask = data.ask;
+    const validAsk =
+      ask &&
+      typeof ask === "object" &&
+      typeof ask.scopeKey === "string" &&
+      typeof ask.anchorLineId === "string" &&
+      typeof ask.text === "string"
+        ? ask
+        : undefined;
+
+    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
+      latest = {
+        cacheKey: data.cacheKey,
+        ask: validAsk,
+        updatedAt: data.updatedAt ?? 0,
+      };
+    }
+  }
+
+  return latest?.ask;
+}
+
+function persistCachedAsk(
+  pi: ExtensionAPI,
+  cacheKey: string,
+  ask?: PersistedAsk,
+): void {
+  pi.appendEntry(DIFF_REVIEW_ASK_CACHE_ENTRY, {
+    cacheKey,
+    ask,
+    updatedAt: Date.now(),
+  } satisfies DiffAskCacheEntry);
+}
+
 export function registerDiffReviewCommand(pi: ExtensionAPI): void {
   pi.registerCommand("diff", {
     description: "Review a git diff in a custom TUI (/diff [git diff args])",
@@ -158,6 +213,7 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
       const cacheKey = getDiffCacheKey(ctx.cwd, source, diffText);
       const comments = getCachedComments(ctx, cacheKey);
       const explanations = getCachedExplanations(ctx, cacheKey);
+      const ask = getCachedAsk(ctx, cacheKey);
       if (comments.size > 0) {
         ctx.ui.notify(
           `Restored ${comments.size} cached diff comment${comments.size === 1 ? "" : "s"}.`,
@@ -169,6 +225,9 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
           `Restored ${explanations.size} cached hunk explanation${explanations.size === 1 ? "" : "s"}.`,
           "info",
         );
+      }
+      if (ask) {
+        ctx.ui.notify("Restored cached ask answer.", "info");
       }
 
       const result = await ctx.ui.custom<ReviewResult>(
@@ -187,6 +246,10 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
             explanations,
             (updatedExplanations) => {
               persistCachedExplanations(pi, cacheKey, updatedExplanations);
+            },
+            ask,
+            (updatedAsk) => {
+              persistCachedAsk(pi, cacheKey, updatedAsk);
             },
           );
         },
