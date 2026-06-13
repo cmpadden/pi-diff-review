@@ -37,15 +37,38 @@ export function buildReviewPrompt(
   comments: ReviewComment[],
   promptLabel: string,
 ): string {
+  return buildCommentPrompt(
+    comments,
+    `Address this local code review feedback for ${promptLabel}.`,
+    "diff",
+  );
+}
+
+export function buildViewReviewPrompt(
+  comments: ReviewComment[],
+  promptLabel: string,
+): string {
+  return buildCommentPrompt(
+    comments,
+    `Address this code review feedback for ${promptLabel}.`,
+    "ts",
+  );
+}
+
+function buildCommentPrompt(
+  comments: ReviewComment[],
+  intro: string,
+  codeFenceLanguage: string,
+): string {
   const body = comments
     .map((comment) => {
       const location = formatCommentLocation(comment);
       const excerpt = comment.lineText.trim()
-        ? `\n  Excerpt:\n\n\`\`\`diff\n${comment.lineText}\n\`\`\``
+        ? `\n  Excerpt:\n\n\`\`\`${codeFenceLanguage}\n${comment.lineText}\n\`\`\``
         : "";
       return `- \`${location}\` — ${comment.text}${excerpt}`;
     })
     .join("\n");
 
-  return `Address this local code review feedback for ${promptLabel}.\n\n## Review comments\n${body}\n\nPlease apply the feedback and summarize what changed.`;
+  return `${intro}\n\n## Review comments\n${body}\n\nPlease apply the feedback and summarize what changed.`;
 }

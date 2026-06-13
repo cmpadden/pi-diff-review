@@ -12,7 +12,40 @@ export function getCurrentHunkScope(
   selected: number,
 ): ExplanationScope | undefined {
   const selectedLine = lines[selected];
-  if (!selectedLine?.filePath || !selectedLine.hunkLabel) return undefined;
+  if (!selectedLine?.filePath) return undefined;
+  if (!selectedLine.commentable && !selectedLine.hunkLabel) return undefined;
+
+  if (!selectedLine.hunkLabel) {
+    let start = selected;
+    while (
+      start > 0 &&
+      lines[start - 1]?.filePath === selectedLine.filePath &&
+      lines[start - 1]?.commentable
+    ) {
+      start--;
+    }
+
+    let end = selected;
+    while (
+      end + 1 < lines.length &&
+      lines[end + 1]?.filePath === selectedLine.filePath &&
+      lines[end + 1]?.commentable
+    ) {
+      end++;
+    }
+
+    const diffText = lines
+      .slice(start, end + 1)
+      .map((line) => line.text.replace(/^ /, ""))
+      .join("\n");
+    return {
+      key: `file:${selectedLine.filePath}:${start}:${end}`,
+      kind: "file",
+      title: selectedLine.filePath,
+      filePath: selectedLine.filePath,
+      diffText,
+    };
+  }
 
   let start = selected;
   while (
