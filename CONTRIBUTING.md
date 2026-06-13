@@ -23,6 +23,10 @@ npm test
 npm run typecheck
 ```
 
+### Feature justification
+
+This extension is a diff review tool, not a general pager or editor. New features should be justified in terms of review, comments, or diff navigation.
+
 ## Releases
 
 Releases are published by pushing a version tag that matches `package.json`.
@@ -57,3 +61,4 @@ The GitHub Actions release workflow will:
 4. Pack the npm package.
 5. Publish the package to npm with provenance.
 6. Create a GitHub Release for the tag with the packed tarball attached.
+
