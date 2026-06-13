@@ -78,7 +78,7 @@ Open one or more files or folders with `/view`:
 - `t` toggles inline comments/explanations
 - `v` toggles the diff between unified and side-by-side split rendering
 - `?` toggles an AI-generated explanation for the current hunk
-- `/` searches diff lines; `n/N` moves between matches while a search is active
+- `/` searches visible diff text, highlights matches, and `n/N` moves between them while a search is active
 - `J/K` to extend a highlighted selection into a comment range
 - `esc` clears the active selection, or exits review when no selection is active
 - `n/p` to jump hunks

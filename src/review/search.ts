@@ -1,17 +1,41 @@
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { ReviewLine } from "./types.ts";
 
+function getSearchableLineText(line: ReviewLine): string {
+  return (
+    line.kind === "add" || line.kind === "remove" || line.kind === "context"
+      ? line.text.slice(1)
+      : line.text
+  ).toLocaleLowerCase();
+}
+
 export type SearchInputResult = {
   selected?: number;
 };
 
+export type SearchMatch = {
+  lineIndex: number;
+  start: number;
+  end: number;
+};
+
 export class ReviewSearchState {
   mode = false;
-  query = "";
   draftQuery = "";
   message = "";
+  private _query = "";
+  private activeMatchIndex = -1;
 
   constructor(private readonly lines: ReviewLine[]) {}
+
+  get query(): string {
+    return this._query;
+  }
+
+  set query(value: string) {
+    this._query = value;
+    this.activeMatchIndex = -1;
+  }
 
   start(): void {
     this.mode = true;
@@ -63,46 +87,83 @@ export class ReviewSearchState {
     const query = this.query.trim();
     if (!query) return {};
 
-    const matches = this.getMatchIndexes(query);
+    const matches = this.getMatches(query);
     if (matches.length === 0) {
+      this.activeMatchIndex = -1;
       this.message = `No matches for /${query}`;
       return {};
     }
 
     this.message = "";
-    const current =
-      direction === 1
-        ? matches.find((index) => index > selected)
-        : [...matches].reverse().find((index) => index < selected);
-    return {
-      selected:
-        current ??
-        (direction === 1 ? matches[0]! : matches[matches.length - 1]!),
-    };
+    let nextIndex: number;
+    if (this.activeMatchIndex >= 0 && this.activeMatchIndex < matches.length) {
+      nextIndex =
+        (this.activeMatchIndex + direction + matches.length) % matches.length;
+    } else {
+      if (direction === 1) {
+        nextIndex = matches.findIndex((match) => match.lineIndex >= selected);
+      } else {
+        nextIndex = -1;
+        for (let index = matches.length - 1; index >= 0; index--) {
+          if (matches[index]!.lineIndex <= selected) {
+            nextIndex = index;
+            break;
+          }
+        }
+      }
+      if (nextIndex < 0) nextIndex = direction === 1 ? 0 : matches.length - 1;
+    }
+
+    this.activeMatchIndex = nextIndex;
+    return { selected: matches[nextIndex]!.lineIndex };
   }
 
-  getStatusText(selected: number): string {
+  getStatusText(_selected: number): string {
     if (this.message) return this.message;
     if (!this.query) return "";
 
-    const matches = this.getMatchIndexes(this.query);
+    const matches = this.getMatches(this.query);
     if (matches.length === 0) return `No matches for /${this.query}`;
 
-    const current = matches.findIndex((index) => index === selected);
     const position =
-      current >= 0
-        ? `${current + 1}/${matches.length}`
+      this.activeMatchIndex >= 0 && this.activeMatchIndex < matches.length
+        ? `${this.activeMatchIndex + 1}/${matches.length}`
         : `${matches.length} matches`;
     return `Search /${this.query} • ${position} • n next • N previous • Esc clear search`;
   }
 
-  private getMatchIndexes(query: string): number[] {
+  getMatchesForLine(lineIndex: number): SearchMatch[] {
+    if (!this.query.trim()) return [];
+    return this.getMatches(this.query).filter((match) => match.lineIndex === lineIndex);
+  }
+
+  getActiveMatch(): SearchMatch | undefined {
+    if (!this.query.trim()) return undefined;
+    const matches = this.getMatches(this.query);
+    return this.activeMatchIndex >= 0 && this.activeMatchIndex < matches.length
+      ? matches[this.activeMatchIndex]
+      : undefined;
+  }
+
+  getHighlightCacheKey(): string {
+    const active = this.getActiveMatch();
+    return active
+      ? `${this.query}\0${active.lineIndex}:${active.start}-${active.end}`
+      : this.query;
+  }
+
+  private getMatches(query: string): SearchMatch[] {
     const needle = query.toLocaleLowerCase();
     if (!needle) return [];
 
-    const matches: number[] = [];
-    this.lines.forEach((line, index) => {
-      if (line.text.toLocaleLowerCase().includes(needle)) matches.push(index);
+    const matches: SearchMatch[] = [];
+    this.lines.forEach((line, lineIndex) => {
+      const haystack = getSearchableLineText(line);
+      let start = haystack.indexOf(needle);
+      while (start >= 0) {
+        matches.push({ lineIndex, start, end: start + needle.length });
+        start = haystack.indexOf(needle, start + needle.length);
+      }
     });
     return matches;
   }
