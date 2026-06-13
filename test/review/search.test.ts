@@ -16,19 +16,39 @@ describe("ReviewSearchState", () => {
     search.query = "needle";
 
     assert.equal(search.jump(1, 0).selected, 1);
-    assert.deepEqual(search.getActiveMatch(), { lineIndex: 1, start: 0, end: 6 });
+    assert.deepEqual(search.getActiveMatch(), {
+      lineIndex: 1,
+      start: 0,
+      end: 6,
+    });
 
     assert.equal(search.jump(1, 1).selected, 1);
-    assert.deepEqual(search.getActiveMatch(), { lineIndex: 1, start: 11, end: 17 });
+    assert.deepEqual(search.getActiveMatch(), {
+      lineIndex: 1,
+      start: 11,
+      end: 17,
+    });
 
     assert.equal(search.jump(1, 1).selected, 3);
-    assert.deepEqual(search.getActiveMatch(), { lineIndex: 3, start: 0, end: 6 });
+    assert.deepEqual(search.getActiveMatch(), {
+      lineIndex: 3,
+      start: 0,
+      end: 6,
+    });
 
     assert.equal(search.jump(1, 3).selected, 1);
-    assert.deepEqual(search.getActiveMatch(), { lineIndex: 1, start: 0, end: 6 });
+    assert.deepEqual(search.getActiveMatch(), {
+      lineIndex: 1,
+      start: 0,
+      end: 6,
+    });
 
     assert.equal(search.jump(-1, 1).selected, 3);
-    assert.deepEqual(search.getActiveMatch(), { lineIndex: 3, start: 0, end: 6 });
+    assert.deepEqual(search.getActiveMatch(), {
+      lineIndex: 3,
+      start: 0,
+      end: 6,
+    });
   });
 
   it("matches display text instead of diff prefixes", () => {

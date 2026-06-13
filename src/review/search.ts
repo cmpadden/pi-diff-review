@@ -134,7 +134,9 @@ export class ReviewSearchState {
 
   getMatchesForLine(lineIndex: number): SearchMatch[] {
     if (!this.query.trim()) return [];
-    return this.getMatches(this.query).filter((match) => match.lineIndex === lineIndex);
+    return this.getMatches(this.query).filter(
+      (match) => match.lineIndex === lineIndex,
+    );
   }
 
   getActiveMatch(): SearchMatch | undefined {
