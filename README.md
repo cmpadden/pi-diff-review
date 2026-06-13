@@ -47,6 +47,14 @@ Review a branch or commit range by passing any `git diff` arguments after `/diff
 /diff main...HEAD
 ```
 
+Review a single file by using a git pathspec after `--`. Pi path autocomplete works here too:
+
+```text
+/diff -- @src/index.ts
+/diff --cached -- @src/index.ts
+/diff main...HEAD -- @src/index.ts
+```
+
 `/diff <git-diff-args>` is passed through to `git diff`, so these examples are equivalent to running `git diff`, `git diff --cached`, and `git diff main...HEAD` locally before opening the review UI.
 
 Open one or more files or folders with `/view`:

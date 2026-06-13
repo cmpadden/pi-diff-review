@@ -22,11 +22,20 @@ export function parseDiffSource(args: string): DiffSource {
 
 function tokenizeDiffArgs(input: string): string[] {
   try {
-    return tokenizeShellArgs(input);
+    return normalizeDiffPathspecs(tokenizeShellArgs(input));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message.replace(/in arguments$/, "in git diff args"));
   }
+}
+
+function normalizeDiffPathspecs(args: string[]): string[] {
+  const separatorIndex = args.indexOf("--");
+  if (separatorIndex < 0) return args;
+
+  return args.map((arg, index) =>
+    index > separatorIndex && arg.startsWith("@") ? arg.slice(1) : arg,
+  );
 }
 
 export const DIFF_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
