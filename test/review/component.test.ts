@@ -191,6 +191,39 @@ describe("ReviewComponent", () => {
     });
   });
 
+  it("highlights the active search match within the line", () => {
+    const theme: ReviewTheme = {
+      fg: (token, text) => `<fg:${token}>${text}</fg:${token}>`,
+      bg: (token, text) => `<bg:${token}>${text}</bg:${token}>`,
+    } as ReviewTheme;
+
+    const highlightedComponent = new ReviewComponent(
+      { requestRender: () => undefined, terminal: { rows: 24, columns: 200 } },
+      theme,
+      "test diff",
+      [
+        {
+          id: "match-line",
+          kind: "context",
+          text: " needle here needle",
+          filePath: "src/example.ts",
+          oldLineNumber: 1,
+          newLineNumber: 1,
+          commentable: true,
+        },
+      ],
+      new Map(),
+      () => undefined,
+    );
+
+    (highlightedComponent as any).search.query = "needle";
+    (highlightedComponent as any).search.jump(1, 0);
+    const output = highlightedComponent.render(200).join("\n");
+
+    assert.match(output, /<fg:warning>needle/);
+    assert.match(output, /<fg:accent>needle/);
+  });
+
   it("q clears an active selection before exiting", () => {
     let result:
       | { action: "submit"; comments: any[] }

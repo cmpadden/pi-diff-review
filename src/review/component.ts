@@ -1375,7 +1375,7 @@ export class ReviewComponent {
     const lineNumber =
       side === "left" ? line.oldLineNumber : line.newLineNumber;
     const prefix = `${commentMark} ${lineNumberCell(lineNumber)} `;
-    let styled = this.renderDiffRowContent(line, prefix);
+    let styled = this.renderDiffRowContent(line, prefix, index);
 
     styled = truncateToWidth(styled, width);
     const selection = this.getSelectionBounds();
@@ -1428,14 +1428,18 @@ export class ReviewComponent {
     return styled;
   }
 
-  private renderDiffRowContent(line: ReviewLine, prefix: string): string {
+  private renderDiffRowContent(
+    line: ReviewLine,
+    prefix: string,
+    index: number,
+  ): string {
     switch (line.kind) {
       case "add":
-        return `${this.theme.fg("toolDiffAdded", prefix)}${this.getHighlightedDisplayText(line)}`;
+        return `${this.theme.fg("toolDiffAdded", prefix)}${this.getHighlightedDisplayText(line, index)}`;
       case "remove":
-        return `${this.theme.fg("toolDiffRemoved", prefix)}${this.getHighlightedDisplayText(line)}`;
+        return `${this.theme.fg("toolDiffRemoved", prefix)}${this.getHighlightedDisplayText(line, index)}`;
       case "context":
-        return `${this.theme.fg("toolDiffContext", prefix)}${this.getHighlightedDisplayText(line)}`;
+        return `${this.theme.fg("toolDiffContext", prefix)}${this.getHighlightedDisplayText(line, index)}`;
       case "hunk":
         return this.theme.fg("accent", `${prefix}${this.getDisplayText(line)}`);
       default:
@@ -1443,14 +1447,20 @@ export class ReviewComponent {
     }
   }
 
-  private getHighlightedDisplayText(line: ReviewLine): string {
+  private getHighlightedDisplayText(line: ReviewLine, index: number): string {
     const code = this.getDisplayText(line);
     if (!code) return code;
 
     const lang = line.filePath ? getLanguageFromPath(line.filePath) : undefined;
-    const cacheKey = `${line.id}\0${lang ?? ""}\0${code}`;
+    const cacheKey = `${line.id}\0${lang ?? ""}\0${this.search.getHighlightCacheKey()}\0${code}`;
     const cached = this.highlightedLineCache.get(cacheKey);
     if (cached != null) return cached;
+
+    const searchHighlighted = this.getSearchHighlightedDisplayText(code, index);
+    if (searchHighlighted) {
+      this.highlightedLineCache.set(cacheKey, searchHighlighted);
+      return searchHighlighted;
+    }
 
     let highlighted = code;
     try {
@@ -1461,6 +1471,32 @@ export class ReviewComponent {
 
     this.highlightedLineCache.set(cacheKey, highlighted);
     return highlighted;
+  }
+
+  private getSearchHighlightedDisplayText(
+    code: string,
+    index: number,
+  ): string | undefined {
+    const matches = this.search.getMatchesForLine(index);
+    if (matches.length === 0) return undefined;
+
+    const activeMatch = this.search.getActiveMatch();
+    let result = "";
+    let cursor = 0;
+    for (const match of matches) {
+      result += code.slice(cursor, match.start);
+      const text = code.slice(match.start, match.end);
+      const isActive =
+        activeMatch?.lineIndex === match.lineIndex &&
+        activeMatch.start === match.start &&
+        activeMatch.end === match.end;
+      result += isActive
+        ? this.theme.bg("selectedBg", this.theme.fg("warning", text))
+        : this.theme.bg("selectedBg", this.theme.fg("accent", text));
+      cursor = match.end;
+    }
+    result += code.slice(cursor);
+    return result;
   }
 
   private renderDiffLine(
@@ -1474,7 +1510,7 @@ export class ReviewComponent {
     const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
     const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
     const prefix = `${commentMark} ${numbers} `;
-    let styled = this.renderDiffRowContent(line, prefix);
+    let styled = this.renderDiffRowContent(line, prefix, index);
 
     styled = truncateToWidth(styled, width);
     const inSelection =
