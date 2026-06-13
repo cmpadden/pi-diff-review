@@ -41,6 +41,7 @@ import type {
   SelectionBounds,
   SplitDiffCell,
   SplitDiffRow,
+  WorkspaceCommentSummary,
 } from "./types.ts";
 
 type InlineBoxPart = "top" | "body" | "bottom";
@@ -122,6 +123,9 @@ export class ReviewComponent {
     private onExplanationsChanged?: (explanations: Map<string, string>) => void,
     cachedAsk?: PersistedAsk,
     private onAskChanged?: (ask?: PersistedAsk) => void,
+    private getWorkspaceCommentSummary?: (
+      comments: Map<string, ReviewComment>,
+    ) => WorkspaceCommentSummary | undefined,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.navigation = new ReviewNavigationState(
@@ -394,11 +398,12 @@ export class ReviewComponent {
   render(width: number): string[] {
     const viewportHeight = this.getContentHeight();
     const selectedLine = this.lines[this.selected];
+    const workspaceSummary = this.getWorkspaceCommentSummary?.(this.comments);
     const output: string[] = [];
 
     output.push(
       this.renderStatusLine(
-        this.getHeaderText(selectedLine),
+        this.getHeaderText(selectedLine, workspaceSummary),
         "Press h for help",
         width,
       ),
@@ -409,15 +414,21 @@ export class ReviewComponent {
 
     output.push(
       truncateToWidth(
-        this.theme.fg("muted", this.getFooterText(selectedLine)),
+        this.theme.fg(
+          "muted",
+          this.getFooterText(selectedLine, workspaceSummary),
+        ),
         width,
       ),
     );
     return this.helpVisible ? this.renderHelpModal(output, width) : output;
   }
 
-  private getHeaderText(selectedLine?: ReviewLine): string {
-    const base = `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments`;
+  private getHeaderText(
+    selectedLine?: ReviewLine,
+    workspaceSummary?: WorkspaceCommentSummary,
+  ): string {
+    const base = `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments${this.formatWorkspaceSummary(workspaceSummary)}`;
 
     if (this.editMode) {
       return `${base} • editing ${this.editingCommentKey === GLOBAL_COMMENT_KEY ? "overall comment" : "inline comment"}`;
@@ -1209,7 +1220,10 @@ export class ReviewComponent {
       : position;
   }
 
-  private getFooterText(selectedLine?: ReviewLine): string {
+  private getFooterText(
+    selectedLine?: ReviewLine,
+    workspaceSummary?: WorkspaceCommentSummary,
+  ): string {
     if (this.search.mode) {
       return `Search: /${this.search.draftQuery} • Enter jump • Esc cancel`;
     }
@@ -1224,7 +1238,27 @@ export class ReviewComponent {
       const endLine = this.lines[selection.end]!;
       return `Selected ${count} lines: ${formatLocation(startLine)} -> ${formatLocation(endLine)}`;
     }
-    return `Selected: ${selectedLine ? formatLocation(selectedLine) : "(no selection)"}`;
+
+    const selectedText = `Selected: ${selectedLine ? formatLocation(selectedLine) : "(no selection)"}`;
+    const workspaceText = this.formatWorkspaceSummary(workspaceSummary, false);
+    return workspaceText ? `${selectedText} • ${workspaceText}` : selectedText;
+  }
+
+  private formatWorkspaceSummary(
+    summary?: WorkspaceCommentSummary,
+    includeVisible = true,
+  ): string {
+    if (!summary) return "";
+
+    const parts: string[] = [];
+    if (includeVisible && summary.visible > 0) parts.push(`${summary.visible} visible persisted`);
+    if (summary.hiddenInCurrentFiles > 0) {
+      parts.push(`${summary.hiddenInCurrentFiles} hidden in current files`);
+    }
+    if (summary.elsewhere > 0) parts.push(`${summary.elsewhere} elsewhere`);
+    if (summary.stale > 0) parts.push(`${summary.stale} stale`);
+    if (summary.orphaned > 0) parts.push(`${summary.orphaned} orphaned`);
+    return parts.length > 0 ? ` • ${parts.join(" • ")}` : "";
   }
 
   private jumpHunk(direction: 1 | -1): void {

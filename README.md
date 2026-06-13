@@ -49,6 +49,14 @@ Review a branch or commit range by passing any `git diff` arguments after `/diff
 
 `/diff <git-diff-args>` is passed through to `git diff`, so these examples are equivalent to running `git diff`, `git diff --cached`, and `git diff main...HEAD` locally before opening the review UI.
 
+Open one or more files or folders with `/view`:
+
+```text
+/view src/index.ts src/review
+```
+
+`/view` expands folders into text files, renders them in the same review UI, and lets you annotate actual code lines instead of diff hunks.
+
 ### Staged vs. unstaged changes
 
 - `/diff` shows unstaged working-tree changes only.
@@ -59,6 +67,7 @@ Review a branch or commit range by passing any `git diff` arguments after `/diff
 ## Features
 
 - `/diff` reviews the current unstaged `git diff`
+- `/view <files-or-folders>` reviews source files directly
 - `/diff --cached` reviews staged changes
 - `/diff main...HEAD` reviews changes on the current branch relative to `main`
 - `/diff <git-diff-args>` passes arguments through to `git diff`
@@ -77,7 +86,9 @@ Review a branch or commit range by passing any `git diff` arguments after `/diff
 - `C` to add or edit an overall diff comment
 - `x` to delete a comment for the current line or selected range
 - `Enter` to submit comments back to pi
-- Comments are cached per session and restored when reopening the same diff
+- Comments are cached per session and restored when reopening the same diff or view
+- File comments are also persisted in a repo-local workspace store and shown again in `/view` or on matching lines in `/diff`
+- The UI indicates persisted comments that are hidden in the current files, elsewhere in the workspace, stale, or orphaned
 - `q` to exit
 
 ## Contributing

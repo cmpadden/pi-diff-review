@@ -4,7 +4,7 @@ import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 
 export type ExplanationScope = {
   key: string;
-  kind: "hunk";
+  kind: "hunk" | "file";
   title: string;
   filePath?: string;
   diffText: string;
@@ -30,10 +30,30 @@ export function buildAskPrompt(
   scope: ExplanationScope,
   question: string,
 ): string {
+  if (scope.kind === "file") {
+    return `Given this code excerpt:\n\`\`\`${scope.filePath ? ` ${scope.filePath}` : ""}\n${scope.diffText}\n\`\`\`\n\n${question}`;
+  }
+
   return `Given this git diff hunk:\n\`\`\`diff\n${scope.diffText}\n\`\`\`\n\n${question}`;
 }
 
 export function buildExplanationPrompt(scope: ExplanationScope): string {
+  if (scope.kind === "file") {
+    return `Explain this code excerpt for a reviewer.
+
+Focus on:
+- what this code is doing
+- why it matters in context
+- behavioral, API, or test implications
+- notable risks or edge cases
+
+Keep it concise and practical.
+
+\`\`\`${scope.filePath ? ` ${scope.filePath}` : ""}
+${scope.diffText}
+\`\`\``;
+  }
+
   return `Explain this git diff hunk for a code reviewer.
 
 Focus on:
@@ -72,7 +92,7 @@ export class PiModelDiffExplainer implements DiffExplainer {
 
     const context: Context = {
       systemPrompt:
-        "You explain code diffs clearly and concisely for code review. Focus on intent, behavior, and risk. Avoid restating every changed line.",
+        "You explain code clearly and concisely for review. Focus on intent, behavior, and risk. Avoid restating every line.",
       messages: [
         {
           role: "user",

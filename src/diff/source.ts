@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import type { DiffSource } from "../review/types.ts";
+import { tokenizeShellArgs } from "../shared/args.ts";
 
 export function parseDiffSource(args: string): DiffSource {
   const trimmed = args.trim();
@@ -20,48 +21,12 @@ export function parseDiffSource(args: string): DiffSource {
 }
 
 function tokenizeDiffArgs(input: string): string[] {
-  const args: string[] = [];
-  let current = "";
-  let quote: '"' | "'" | undefined;
-  let escaping = false;
-
-  for (const char of input) {
-    if (escaping) {
-      current += char;
-      escaping = false;
-      continue;
-    }
-
-    if (char === "\\" && quote !== "'") {
-      escaping = true;
-      continue;
-    }
-
-    if ((char === '"' || char === "'") && !quote) {
-      quote = char;
-      continue;
-    }
-
-    if (char === quote) {
-      quote = undefined;
-      continue;
-    }
-
-    if (/\s/.test(char) && !quote) {
-      if (current) {
-        args.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += char;
+  try {
+    return tokenizeShellArgs(input);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message.replace(/in arguments$/, "in git diff args"));
   }
-
-  if (escaping) current += "\\";
-  if (quote) throw new Error(`Unterminated ${quote} quote in git diff args`);
-  if (current) args.push(current);
-  return args;
 }
 
 export const DIFF_MAX_BUFFER_BYTES = 128 * 1024 * 1024;

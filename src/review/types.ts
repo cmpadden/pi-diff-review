@@ -48,6 +48,14 @@ export type PersistedAsk = {
   text: string;
 };
 
+export type WorkspaceCommentSummary = {
+  visible: number;
+  hiddenInCurrentFiles: number;
+  elsewhere: number;
+  stale: number;
+  orphaned: number;
+};
+
 export type DiffRenderMode = "unified" | "split";
 
 export type SplitDiffCell = {

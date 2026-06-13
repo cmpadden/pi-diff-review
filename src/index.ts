@@ -6,197 +6,31 @@ import type {
 import { getDiff, parseDiffSource } from "./diff/source.ts";
 import { parseDiff } from "./diff/parser.ts";
 import { PiModelDiffExplainer } from "./explanation/explainer.ts";
-import { buildReviewPrompt } from "./review/prompt.ts";
+import {
+  getCachedAsk,
+  getCachedComments,
+  getCachedExplanations,
+  persistCachedAsk,
+  persistCachedComments,
+  persistCachedExplanations,
+} from "./review/cache.ts";
 import { ReviewComponent } from "./review/component.ts";
-import type {
-  DiffSource,
-  PersistedAsk,
-  ReviewComment,
-  ReviewResult,
-} from "./review/types.ts";
+import { buildReviewPrompt, buildViewReviewPrompt } from "./review/prompt.ts";
+import type { ReviewComment, ReviewLine, ReviewResult } from "./review/types.ts";
+import { WorkspaceCommentStore } from "./review/workspace-comments.ts";
+import { parseViewFiles } from "./view/parser.ts";
+import { parseViewSource, resolveViewFiles } from "./view/source.ts";
 
-const DIFF_REVIEW_CACHE_ENTRY = "pi-diff-review-cache";
-const DIFF_REVIEW_EXPLANATION_CACHE_ENTRY = "pi-diff-review-explanation-cache";
-const DIFF_REVIEW_ASK_CACHE_ENTRY = "pi-diff-review-ask-cache";
-
-type DiffReviewCacheEntry = {
-  cacheKey: string;
-  comments: ReviewComment[];
-  updatedAt: number;
-};
-
-type DiffExplanationCacheEntry = {
-  cacheKey: string;
-  explanations: Record<string, string>;
-  updatedAt: number;
-};
-
-type DiffAskCacheEntry = {
-  cacheKey: string;
-  ask?: PersistedAsk;
-  updatedAt: number;
-};
-
-function getDiffCacheKey(
-  cwd: string,
-  source: DiffSource,
-  diffText: string,
-): string {
-  const hash = createHash("sha256").update(diffText).digest("hex");
-  return `${cwd}\0${source.label}\0${hash}`;
-}
-
-function getCachedComments(
-  ctx: ExtensionCommandContext,
-  cacheKey: string,
-): Map<string, ReviewComment> {
-  let latest: DiffReviewCacheEntry | undefined;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (
-      entry.type !== "custom" ||
-      entry.customType !== DIFF_REVIEW_CACHE_ENTRY
-    ) {
-      continue;
-    }
-
-    const data = entry.data as Partial<DiffReviewCacheEntry> | undefined;
-    if (data?.cacheKey !== cacheKey || !Array.isArray(data.comments)) {
-      continue;
-    }
-
-    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
-      latest = {
-        cacheKey: data.cacheKey,
-        comments: data.comments,
-        updatedAt: data.updatedAt ?? 0,
-      };
-    }
-  }
-
-  return new Map(
-    (latest?.comments ?? []).map((comment) => [comment.id, comment]),
-  );
-}
-
-function persistCachedComments(
-  pi: ExtensionAPI,
-  cacheKey: string,
-  comments: Iterable<ReviewComment>,
-): void {
-  pi.appendEntry(DIFF_REVIEW_CACHE_ENTRY, {
-    cacheKey,
-    comments: [...comments],
-    updatedAt: Date.now(),
-  } satisfies DiffReviewCacheEntry);
-}
-
-function getCachedExplanations(
-  ctx: ExtensionCommandContext,
-  cacheKey: string,
-): Map<string, string> {
-  let latest: DiffExplanationCacheEntry | undefined;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (
-      entry.type !== "custom" ||
-      entry.customType !== DIFF_REVIEW_EXPLANATION_CACHE_ENTRY
-    ) {
-      continue;
-    }
-
-    const data = entry.data as Partial<DiffExplanationCacheEntry> | undefined;
-    if (
-      data?.cacheKey !== cacheKey ||
-      !data.explanations ||
-      typeof data.explanations !== "object" ||
-      Array.isArray(data.explanations)
-    ) {
-      continue;
-    }
-
-    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
-      latest = {
-        cacheKey: data.cacheKey,
-        explanations: Object.fromEntries(
-          Object.entries(data.explanations).filter(
-            (entry): entry is [string, string] =>
-              typeof entry[0] === "string" && typeof entry[1] === "string",
-          ),
-        ),
-        updatedAt: data.updatedAt ?? 0,
-      };
-    }
-  }
-
-  return new Map(Object.entries(latest?.explanations ?? {}));
-}
-
-function persistCachedExplanations(
-  pi: ExtensionAPI,
-  cacheKey: string,
-  explanations: Map<string, string>,
-): void {
-  pi.appendEntry(DIFF_REVIEW_EXPLANATION_CACHE_ENTRY, {
-    cacheKey,
-    explanations: Object.fromEntries(explanations),
-    updatedAt: Date.now(),
-  } satisfies DiffExplanationCacheEntry);
-}
-
-function getCachedAsk(
-  ctx: ExtensionCommandContext,
-  cacheKey: string,
-): PersistedAsk | undefined {
-  let latest: DiffAskCacheEntry | undefined;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (
-      entry.type !== "custom" ||
-      entry.customType !== DIFF_REVIEW_ASK_CACHE_ENTRY
-    ) {
-      continue;
-    }
-
-    const data = entry.data as Partial<DiffAskCacheEntry> | undefined;
-    if (data?.cacheKey !== cacheKey) continue;
-
-    const ask = data.ask;
-    const validAsk =
-      ask &&
-      typeof ask === "object" &&
-      typeof ask.scopeKey === "string" &&
-      typeof ask.anchorLineId === "string" &&
-      typeof ask.text === "string"
-        ? ask
-        : undefined;
-
-    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
-      latest = {
-        cacheKey: data.cacheKey,
-        ask: validAsk,
-        updatedAt: data.updatedAt ?? 0,
-      };
-    }
-  }
-
-  return latest?.ask;
-}
-
-function persistCachedAsk(
-  pi: ExtensionAPI,
-  cacheKey: string,
-  ask?: PersistedAsk,
-): void {
-  pi.appendEntry(DIFF_REVIEW_ASK_CACHE_ENTRY, {
-    cacheKey,
-    ask,
-    updatedAt: Date.now(),
-  } satisfies DiffAskCacheEntry);
+function getReviewCacheKey(cwd: string, label: string, text: string): string {
+  const hash = createHash("sha256").update(text).digest("hex");
+  return `${cwd}\0${label}\0${hash}`;
 }
 
 export function registerDiffReviewCommand(pi: ExtensionAPI): void {
   pi.registerCommand("diff", {
     description: "Review a git diff in a custom TUI (/diff [git diff args])",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
-      let source: DiffSource;
+      let source;
       let diffText: string;
       try {
         source = parseDiffSource(args);
@@ -213,62 +47,156 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
       }
 
       const reviewLines = parseDiff(diffText);
-      const cacheKey = getDiffCacheKey(ctx.cwd, source, diffText);
-      const comments = getCachedComments(ctx, cacheKey);
-      const explanations = getCachedExplanations(ctx, cacheKey);
-      const ask = getCachedAsk(ctx, cacheKey);
-      if (comments.size > 0) {
-        ctx.ui.notify(
-          `Restored ${comments.size} cached diff comment${comments.size === 1 ? "" : "s"}.`,
-          "info",
-        );
-      }
-      if (explanations.size > 0) {
-        ctx.ui.notify(
-          `Restored ${explanations.size} cached hunk explanation${explanations.size === 1 ? "" : "s"}.`,
-          "info",
-        );
-      }
-      if (ask) {
-        ctx.ui.notify("Restored cached ask answer.", "info");
-      }
+      await openReview(pi, ctx, {
+        title: source.label,
+        promptLabel: source.promptLabel,
+        cacheKey: getReviewCacheKey(ctx.cwd, source.label, diffText),
+        reviewLines,
+        buildPrompt: (comments) => buildReviewPrompt(comments, source.promptLabel),
+      });
+    },
+  });
+}
 
-      const result = await ctx.ui.custom<ReviewResult>(
-        (tui, theme, _keybindings, done) => {
-          return new ReviewComponent(
-            tui,
-            theme,
-            source.label,
-            reviewLines,
-            comments,
-            done,
-            new PiModelDiffExplainer(ctx),
-            (updatedComments) => {
-              persistCachedComments(pi, cacheKey, updatedComments.values());
-            },
-            explanations,
-            (updatedExplanations) => {
-              persistCachedExplanations(pi, cacheKey, updatedExplanations);
-            },
-            ask,
-            (updatedAsk) => {
-              persistCachedAsk(pi, cacheKey, updatedAsk);
-            },
-          );
-        },
-      );
-
-      if (!result || result.action !== "submit") return;
-      if (result.comments.length === 0) {
-        ctx.ui.notify("No review comments to send.", "info");
-        persistCachedComments(pi, cacheKey, []);
+export function registerViewCommand(pi: ExtensionAPI): void {
+  pi.registerCommand("view", {
+    description: "Review one or more files or folders in a custom TUI (/view <paths...>)",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      let source;
+      let files: string[];
+      try {
+        source = parseViewSource(args);
+        files = resolveViewFiles(ctx.cwd, source);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Unable to open view: ${message}`, "error");
         return;
       }
 
-      persistCachedComments(pi, cacheKey, []);
-      pi.sendUserMessage(
-        buildReviewPrompt(result.comments, source.promptLabel),
-      );
+      if (files.length === 0) {
+        ctx.ui.notify("No viewable text files matched the requested paths.", "info");
+        return;
+      }
+
+      const workspaceStore = new WorkspaceCommentStore(ctx.cwd);
+      const reviewLines = parseViewFiles(workspaceStore.rootPath, files);
+      const contentKey = reviewLines.map((line) => line.text).join("\n");
+
+      await openReview(pi, ctx, {
+        title: source.label,
+        promptLabel: source.promptLabel,
+        cacheKey: getReviewCacheKey(ctx.cwd, source.label, contentKey),
+        reviewLines,
+        workspaceStore,
+        buildPrompt: (comments) => buildViewReviewPrompt(comments, source.promptLabel),
+      });
     },
   });
+}
+
+async function openReview(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  options: {
+    title: string;
+    promptLabel: string;
+    cacheKey: string;
+    reviewLines: ReviewLine[];
+    buildPrompt: (comments: ReviewComment[]) => string;
+    workspaceStore?: WorkspaceCommentStore;
+  },
+): Promise<void> {
+  const workspaceStore = options.workspaceStore ?? new WorkspaceCommentStore(ctx.cwd);
+  const cachedComments = getCachedComments(ctx, options.cacheKey);
+  const comments = workspaceStore.getVisibleComments(options.reviewLines);
+  for (const [id, comment] of cachedComments) {
+    comments.set(id, comment);
+  }
+
+  const explanations = getCachedExplanations(ctx, options.cacheKey);
+  const ask = getCachedAsk(ctx, options.cacheKey);
+  const summary = () => workspaceStore.summarize(options.reviewLines);
+
+  if (cachedComments.size > 0) {
+    ctx.ui.notify(
+      `Restored ${cachedComments.size} cached review comment${cachedComments.size === 1 ? "" : "s"}.`,
+      "info",
+    );
+  }
+  if (explanations.size > 0) {
+    ctx.ui.notify(
+      `Restored ${explanations.size} cached explanation${explanations.size === 1 ? "" : "s"}.`,
+      "info",
+    );
+  }
+  if (ask) {
+    ctx.ui.notify("Restored cached ask answer.", "info");
+  }
+
+  const initialSummary = summary();
+  if (initialSummary.hiddenInCurrentFiles > 0 || initialSummary.elsewhere > 0) {
+    ctx.ui.notify(
+      [
+        initialSummary.hiddenInCurrentFiles > 0
+          ? `${initialSummary.hiddenInCurrentFiles} comments hidden in current files`
+          : undefined,
+        initialSummary.elsewhere > 0
+          ? `${initialSummary.elsewhere} comments elsewhere in the workspace`
+          : undefined,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+      "info",
+    );
+  }
+  if (initialSummary.stale > 0 || initialSummary.orphaned > 0) {
+    ctx.ui.notify(
+      [
+        initialSummary.stale > 0
+          ? `${initialSummary.stale} stale comment${initialSummary.stale === 1 ? "" : "s"}`
+          : undefined,
+        initialSummary.orphaned > 0
+          ? `${initialSummary.orphaned} orphaned comment${initialSummary.orphaned === 1 ? "" : "s"}`
+          : undefined,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+      "warning",
+    );
+  }
+
+  const result = await ctx.ui.custom<ReviewResult>((tui, theme, _keybindings, done) => {
+    return new ReviewComponent(
+      tui,
+      theme,
+      options.title,
+      options.reviewLines,
+      comments,
+      done,
+      new PiModelDiffExplainer(ctx),
+      (updatedComments) => {
+        persistCachedComments(pi, options.cacheKey, updatedComments.values());
+        workspaceStore.syncFromComments(options.reviewLines, updatedComments.values());
+      },
+      explanations,
+      (updatedExplanations) => {
+        persistCachedExplanations(pi, options.cacheKey, updatedExplanations);
+      },
+      ask,
+      (updatedAsk) => {
+        persistCachedAsk(pi, options.cacheKey, updatedAsk);
+      },
+      () => summary(),
+    );
+  });
+
+  if (!result || result.action !== "submit") return;
+  if (result.comments.length === 0) {
+    ctx.ui.notify("No review comments to send.", "info");
+    persistCachedComments(pi, options.cacheKey, []);
+    return;
+  }
+
+  persistCachedComments(pi, options.cacheKey, []);
+  pi.sendUserMessage(options.buildPrompt(result.comments));
 }
