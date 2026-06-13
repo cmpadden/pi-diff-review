@@ -34,6 +34,18 @@ describe("parseDiffSource", () => {
     ]);
   });
 
+  it("strips pi @ path prefixes after --", () => {
+    assert.deepEqual(
+      parseDiffSource("main...HEAD -- @src/index.ts @'file name.ts'").args,
+      ["main...HEAD", "--", "src/index.ts", "file name.ts"],
+    );
+  });
+
+  it("preserves git revision syntax outside --", () => {
+    assert.deepEqual(parseDiffSource("@~1").args, ["@~1"]);
+    assert.deepEqual(parseDiffSource("@{upstream}").args, ["@{upstream}"]);
+  });
+
   it("throws for unterminated quotes", () => {
     assert.throws(
       () => parseDiffSource("-- 'unterminated"),
