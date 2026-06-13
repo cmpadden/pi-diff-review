@@ -8,7 +8,10 @@ import { parseViewSource, resolveViewFiles } from "../../src/view/source.ts";
 
 describe("parseViewSource", () => {
   it("requires at least one path", () => {
-    assert.throws(() => parseViewSource(""), /Provide one or more files or folders/);
+    assert.throws(
+      () => parseViewSource(""),
+      /Provide one or more files or folders/,
+    );
   });
 
   it("tokenizes quoted paths", () => {
@@ -38,10 +41,10 @@ describe("resolveViewFiles", () => {
 
       const files = resolveViewFiles(cwd, parseViewSource("src notes.md"));
 
-      assert.deepEqual(files.map((file) => file.replace(`${cwd}/`, "")), [
-        "notes.md",
-        "src/a.ts",
-      ]);
+      assert.deepEqual(
+        files.map((file) => file.replace(`${cwd}/`, "")),
+        ["notes.md", "src/a.ts"],
+      );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

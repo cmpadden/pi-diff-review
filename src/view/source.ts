@@ -45,7 +45,11 @@ export function resolveViewFiles(cwd: string, source: ViewSource): string[] {
     if (!stats) throw new Error(`Path does not exist: ${inputPath}`);
 
     if (stats.isDirectory()) {
-      const gitFiles = getGitTrackedAndUntrackedFiles(cwd, inputPath, gitFilesByDir);
+      const gitFiles = getGitTrackedAndUntrackedFiles(
+        cwd,
+        inputPath,
+        gitFilesByDir,
+      );
       if (gitFiles) {
         for (const file of gitFiles) resolved.add(resolve(cwd, file));
         continue;

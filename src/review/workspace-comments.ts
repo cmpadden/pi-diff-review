@@ -71,8 +71,12 @@ export class WorkspaceCommentStore {
       if (comment.status === "orphaned") continue;
       const startLine = comment.resolvedStartLine ?? comment.startLine;
       const endLine = comment.resolvedEndLine ?? comment.endLine;
-      const start = lineByFileAndNumber.get(getFileLineKey(comment.filePath, startLine));
-      const end = lineByFileAndNumber.get(getFileLineKey(comment.filePath, endLine));
+      const start = lineByFileAndNumber.get(
+        getFileLineKey(comment.filePath, startLine),
+      );
+      const end = lineByFileAndNumber.get(
+        getFileLineKey(comment.filePath, endLine),
+      );
       if (!start || !end) continue;
       const reviewCommentId = `${start.id}:${end.id}`;
       visible.set(reviewCommentId, {
@@ -92,7 +96,9 @@ export class WorkspaceCommentStore {
 
   summarize(lines: ReviewLine[]): WorkspaceCommentSummary {
     const lineByFileAndNumber = buildLineLookup(lines);
-    const currentFiles = new Set(lines.map((line) => line.filePath).filter(isPresent));
+    const currentFiles = new Set(
+      lines.map((line) => line.filePath).filter(isPresent),
+    );
     const visible = new Set<string>();
     let hiddenInCurrentFiles = 0;
     let elsewhere = 0;
@@ -136,11 +142,18 @@ export class WorkspaceCommentStore {
     };
   }
 
-  syncFromComments(lines: ReviewLine[], comments: Iterable<ReviewComment>): void {
+  syncFromComments(
+    lines: ReviewLine[],
+    comments: Iterable<ReviewComment>,
+  ): void {
     const store = readStoreFile(this.storePath);
-    const next = new Map(store.comments.map((comment) => [comment.id, comment]));
+    const next = new Map(
+      store.comments.map((comment) => [comment.id, comment]),
+    );
     const commentIdsForCurrentFiles = new Set<string>();
-    const currentFiles = new Set(lines.map((line) => line.filePath).filter(isPresent));
+    const currentFiles = new Set(
+      lines.map((line) => line.filePath).filter(isPresent),
+    );
 
     for (const comment of store.comments) {
       if (currentFiles.has(comment.filePath)) {
@@ -158,7 +171,10 @@ export class WorkspaceCommentStore {
       if (record) next.set(record.id, record);
     }
 
-    writeStoreFile(this.storePath, { version: STORE_VERSION, comments: [...next.values()] });
+    writeStoreFile(this.storePath, {
+      version: STORE_VERSION,
+      comments: [...next.values()],
+    });
   }
 
   private getPreviousRecord(
@@ -203,8 +219,14 @@ export class WorkspaceCommentStore {
     const from = Math.max(1, Math.min(startLine, endLine));
     const to = Math.max(startLine, endLine);
     const excerpt = currentLines.slice(from - 1, to).join("\n");
-    const beforeContext = currentLines.slice(Math.max(0, from - 1 - MAX_CONTEXT_LINES), from - 1);
-    const afterContext = currentLines.slice(to, Math.min(currentLines.length, to + MAX_CONTEXT_LINES));
+    const beforeContext = currentLines.slice(
+      Math.max(0, from - 1 - MAX_CONTEXT_LINES),
+      from - 1,
+    );
+    const afterContext = currentLines.slice(
+      to,
+      Math.min(currentLines.length, to + MAX_CONTEXT_LINES),
+    );
     const now = Date.now();
 
     return {
@@ -222,7 +244,9 @@ export class WorkspaceCommentStore {
     };
   }
 
-  private resolveComment(comment: WorkspaceCommentRecord): ResolvedWorkspaceComment {
+  private resolveComment(
+    comment: WorkspaceCommentRecord,
+  ): ResolvedWorkspaceComment {
     const absolutePath = resolve(this.root, comment.filePath);
     const currentLines = readTextLines(absolutePath);
     if (!currentLines) {
@@ -234,7 +258,10 @@ export class WorkspaceCommentStore {
       .slice(comment.startLine - 1, comment.endLine)
       .join("\n");
 
-    if (currentHash === comment.fileContentHash && expectedExcerpt === comment.excerpt) {
+    if (
+      currentHash === comment.fileContentHash &&
+      expectedExcerpt === comment.excerpt
+    ) {
       return {
         ...comment,
         status: "active",
@@ -287,7 +314,9 @@ function findExcerptMatch(
 
   let match: { startLine: number; endLine: number } | undefined;
   for (let index = 0; index <= lines.length - excerptLines.length; index++) {
-    const candidate = lines.slice(index, index + excerptLines.length).join("\n");
+    const candidate = lines
+      .slice(index, index + excerptLines.length)
+      .join("\n");
     if (candidate !== excerpt) continue;
     if (match) return undefined;
     match = { startLine: index + 1, endLine: index + excerptLines.length };
@@ -304,23 +333,31 @@ function findContextualMatch(
   const after = comment.afterContext;
   if (excerptLines.length === 0) return undefined;
 
-  let best:
-    | { startLine: number; endLine: number; score: number }
-    | undefined;
+  let best: { startLine: number; endLine: number; score: number } | undefined;
 
   for (let index = 0; index <= lines.length - excerptLines.length; index++) {
     const candidateLines = lines.slice(index, index + excerptLines.length);
     let score = 0;
     if (candidateLines.join("\n") === comment.excerpt) score += 10;
 
-    const beforeCandidate = lines.slice(Math.max(0, index - before.length), index);
-    const afterCandidate = lines.slice(index + excerptLines.length, index + excerptLines.length + after.length);
+    const beforeCandidate = lines.slice(
+      Math.max(0, index - before.length),
+      index,
+    );
+    const afterCandidate = lines.slice(
+      index + excerptLines.length,
+      index + excerptLines.length + after.length,
+    );
     score += countSuffixMatches(beforeCandidate, before);
     score += countPrefixMatches(afterCandidate, after);
     score -= Math.abs(index + 1 - comment.startLine) * 0.01;
 
     if (!best || score > best.score) {
-      best = { startLine: index + 1, endLine: index + excerptLines.length, score };
+      best = {
+        startLine: index + 1,
+        endLine: index + excerptLines.length,
+        score,
+      };
     } else if (best && score === best.score) {
       best = undefined;
     }
@@ -363,7 +400,9 @@ function hashText(text: string): string {
 function readStoreFile(path: string): WorkspaceCommentStoreFile {
   try {
     if (!existsSync(path)) return { version: STORE_VERSION, comments: [] };
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<WorkspaceCommentStoreFile>;
+    const parsed = JSON.parse(
+      readFileSync(path, "utf8"),
+    ) as Partial<WorkspaceCommentStoreFile>;
     const comments = Array.isArray(parsed.comments)
       ? parsed.comments.filter(isWorkspaceCommentRecord)
       : [];
@@ -378,7 +417,9 @@ function writeStoreFile(path: string, store: WorkspaceCommentStoreFile): void {
   writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, "utf8");
 }
 
-function isWorkspaceCommentRecord(value: unknown): value is WorkspaceCommentRecord {
+function isWorkspaceCommentRecord(
+  value: unknown,
+): value is WorkspaceCommentRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Partial<WorkspaceCommentRecord>;
   return (
@@ -410,11 +451,15 @@ function getWorkspaceRoot(cwd: string): string {
 }
 
 function getStorePath(cwd: string, root: string): string {
-  const gitPathResult = spawnSync("git", ["rev-parse", "--git-path", "pi-diff-review-comments.json"], {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+  const gitPathResult = spawnSync(
+    "git",
+    ["rev-parse", "--git-path", "pi-diff-review-comments.json"],
+    {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
   if (gitPathResult.status === 0) {
     const gitPath = gitPathResult.stdout.trim();
     if (gitPath) return isAbsolute(gitPath) ? gitPath : resolve(root, gitPath);

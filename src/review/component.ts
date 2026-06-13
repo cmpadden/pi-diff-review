@@ -1251,7 +1251,8 @@ export class ReviewComponent {
     if (!summary) return "";
 
     const parts: string[] = [];
-    if (includeVisible && summary.visible > 0) parts.push(`${summary.visible} visible persisted`);
+    if (includeVisible && summary.visible > 0)
+      parts.push(`${summary.visible} visible persisted`);
     if (summary.hiddenInCurrentFiles > 0) {
       parts.push(`${summary.hiddenInCurrentFiles} hidden in current files`);
     }

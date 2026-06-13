@@ -32,7 +32,10 @@ export function getCachedComments(
 ): Map<string, ReviewComment> {
   let latest: ReviewCommentCacheEntry | undefined;
   for (const entry of ctx.sessionManager.getEntries()) {
-    if (entry.type !== "custom" || entry.customType !== REVIEW_COMMENT_CACHE_ENTRY) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== REVIEW_COMMENT_CACHE_ENTRY
+    ) {
       continue;
     }
 
@@ -48,7 +51,9 @@ export function getCachedComments(
     }
   }
 
-  return new Map((latest?.comments ?? []).map((comment) => [comment.id, comment]));
+  return new Map(
+    (latest?.comments ?? []).map((comment) => [comment.id, comment]),
+  );
 }
 
 export function persistCachedComments(
@@ -121,7 +126,10 @@ export function getCachedAsk(
 ): PersistedAsk | undefined {
   let latest: ReviewAskCacheEntry | undefined;
   for (const entry of ctx.sessionManager.getEntries()) {
-    if (entry.type !== "custom" || entry.customType !== REVIEW_ASK_CACHE_ENTRY) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== REVIEW_ASK_CACHE_ENTRY
+    ) {
       continue;
     }
 

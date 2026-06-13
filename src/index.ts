@@ -16,7 +16,11 @@ import {
 } from "./review/cache.ts";
 import { ReviewComponent } from "./review/component.ts";
 import { buildReviewPrompt, buildViewReviewPrompt } from "./review/prompt.ts";
-import type { ReviewComment, ReviewLine, ReviewResult } from "./review/types.ts";
+import type {
+  ReviewComment,
+  ReviewLine,
+  ReviewResult,
+} from "./review/types.ts";
 import { WorkspaceCommentStore } from "./review/workspace-comments.ts";
 import { parseViewFiles } from "./view/parser.ts";
 import { parseViewSource, resolveViewFiles } from "./view/source.ts";
@@ -52,7 +56,8 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
         promptLabel: source.promptLabel,
         cacheKey: getReviewCacheKey(ctx.cwd, source.label, diffText),
         reviewLines,
-        buildPrompt: (comments) => buildReviewPrompt(comments, source.promptLabel),
+        buildPrompt: (comments) =>
+          buildReviewPrompt(comments, source.promptLabel),
       });
     },
   });
@@ -60,7 +65,8 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
 
 export function registerViewCommand(pi: ExtensionAPI): void {
   pi.registerCommand("view", {
-    description: "Review one or more files or folders in a custom TUI (/view <paths...>)",
+    description:
+      "Review one or more files or folders in a custom TUI (/view <paths...>)",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       let source;
       let files: string[];
@@ -74,7 +80,10 @@ export function registerViewCommand(pi: ExtensionAPI): void {
       }
 
       if (files.length === 0) {
-        ctx.ui.notify("No viewable text files matched the requested paths.", "info");
+        ctx.ui.notify(
+          "No viewable text files matched the requested paths.",
+          "info",
+        );
         return;
       }
 
@@ -88,7 +97,8 @@ export function registerViewCommand(pi: ExtensionAPI): void {
         cacheKey: getReviewCacheKey(ctx.cwd, source.label, contentKey),
         reviewLines,
         workspaceStore,
-        buildPrompt: (comments) => buildViewReviewPrompt(comments, source.promptLabel),
+        buildPrompt: (comments) =>
+          buildViewReviewPrompt(comments, source.promptLabel),
       });
     },
   });
@@ -106,7 +116,8 @@ async function openReview(
     workspaceStore?: WorkspaceCommentStore;
   },
 ): Promise<void> {
-  const workspaceStore = options.workspaceStore ?? new WorkspaceCommentStore(ctx.cwd);
+  const workspaceStore =
+    options.workspaceStore ?? new WorkspaceCommentStore(ctx.cwd);
   const cachedComments = getCachedComments(ctx, options.cacheKey);
   const comments = workspaceStore.getVisibleComments(options.reviewLines);
   for (const [id, comment] of cachedComments) {
@@ -165,30 +176,35 @@ async function openReview(
     );
   }
 
-  const result = await ctx.ui.custom<ReviewResult>((tui, theme, _keybindings, done) => {
-    return new ReviewComponent(
-      tui,
-      theme,
-      options.title,
-      options.reviewLines,
-      comments,
-      done,
-      new PiModelDiffExplainer(ctx),
-      (updatedComments) => {
-        persistCachedComments(pi, options.cacheKey, updatedComments.values());
-        workspaceStore.syncFromComments(options.reviewLines, updatedComments.values());
-      },
-      explanations,
-      (updatedExplanations) => {
-        persistCachedExplanations(pi, options.cacheKey, updatedExplanations);
-      },
-      ask,
-      (updatedAsk) => {
-        persistCachedAsk(pi, options.cacheKey, updatedAsk);
-      },
-      () => summary(),
-    );
-  });
+  const result = await ctx.ui.custom<ReviewResult>(
+    (tui, theme, _keybindings, done) => {
+      return new ReviewComponent(
+        tui,
+        theme,
+        options.title,
+        options.reviewLines,
+        comments,
+        done,
+        new PiModelDiffExplainer(ctx),
+        (updatedComments) => {
+          persistCachedComments(pi, options.cacheKey, updatedComments.values());
+          workspaceStore.syncFromComments(
+            options.reviewLines,
+            updatedComments.values(),
+          );
+        },
+        explanations,
+        (updatedExplanations) => {
+          persistCachedExplanations(pi, options.cacheKey, updatedExplanations);
+        },
+        ask,
+        (updatedAsk) => {
+          persistCachedAsk(pi, options.cacheKey, updatedAsk);
+        },
+        () => summary(),
+      );
+    },
+  );
 
   if (!result || result.action !== "submit") return;
   if (result.comments.length === 0) {

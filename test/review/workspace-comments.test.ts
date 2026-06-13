@@ -18,7 +18,11 @@ function buildLines(filePath: string, texts: string[]): ReviewLine[] {
   }));
 }
 
-function buildComment(lines: ReviewLine[], lineNumber: number, text: string): ReviewComment {
+function buildComment(
+  lines: ReviewLine[],
+  lineNumber: number,
+  text: string,
+): ReviewComment {
   const line = lines[lineNumber - 1]!;
   return {
     id: `${line.id}:${line.id}`,
@@ -50,7 +54,12 @@ describe("WorkspaceCommentStore", () => {
       assert.equal(summary.stale, 0);
 
       writeFileSync(filePath, "zero\none\ntwo\nthree\n", "utf8");
-      const movedLines = buildLines("src/example.ts", ["zero", "one", "two", "three"]);
+      const movedLines = buildLines("src/example.ts", [
+        "zero",
+        "one",
+        "two",
+        "three",
+      ]);
       summary = store.summarize(movedLines);
       assert.equal(summary.visible, 1);
       assert.equal(summary.stale, 1);
