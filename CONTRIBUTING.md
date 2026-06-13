@@ -15,6 +15,14 @@ pre-commit run --all-files
 npm run precommit
 ```
 
+For any code change, validate the repo before submitting by running:
+
+```bash
+npm run format
+npm test
+npm run typecheck
+```
+
 ## Releases
 
 Releases are published by pushing a version tag that matches `package.json`.
