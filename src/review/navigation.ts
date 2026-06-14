@@ -19,14 +19,16 @@ export class ReviewNavigationState {
   }
 
   move(delta: number): boolean {
-    const next = this.clampLineIndex(this.selected + delta);
-    if (next === this.selected) return false;
-    this.selected = next;
-    return true;
+    return this.setSelected(this.selected + delta);
   }
 
   jumpToBoundary(boundary: "start" | "end"): JumpBoundaryResult {
     const next = boundary === "start" ? 0 : Math.max(0, this.lineCount - 1);
+    return this.jumpToIndex(next);
+  }
+
+  jumpToIndex(index: number): JumpBoundaryResult {
+    const next = this.clampLineIndex(index);
     const hadSelection = this.selectionAnchor != null;
     const changed = next !== this.selected || hadSelection;
     this.selected = next;
@@ -35,10 +37,14 @@ export class ReviewNavigationState {
   }
 
   extendSelection(delta: number): boolean {
+    return this.extendSelectionTo(this.selected + delta);
+  }
+
+  extendSelectionTo(index: number): boolean {
     if (this.selectionAnchor == null) {
       this.selectionAnchor = this.selected;
     }
-    const next = this.clampLineIndex(this.selected + delta);
+    const next = this.clampLineIndex(index);
     if (next === this.selected) return false;
     this.selected = next;
     return true;
@@ -47,6 +53,13 @@ export class ReviewNavigationState {
   clearSelection(): boolean {
     if (this.selectionAnchor == null) return false;
     this.selectionAnchor = undefined;
+    return true;
+  }
+
+  setSelected(index: number): boolean {
+    const next = this.clampLineIndex(index);
+    if (next === this.selected) return false;
+    this.selected = next;
     return true;
   }
 

@@ -22,6 +22,61 @@ function buildLines(count: number): ReviewLine[] {
   }));
 }
 
+function buildMultiFileLines(): ReviewLine[] {
+  return [
+    {
+      id: "a-meta",
+      kind: "meta",
+      text: "diff --git a/a.ts b/a.ts",
+      filePath: "src/a.ts",
+      commentable: false,
+    },
+    {
+      id: "a-hunk",
+      kind: "hunk",
+      text: "@@ -1 +1 @@",
+      filePath: "src/a.ts",
+      commentable: false,
+      hunkLabel: "@@ -1 +1 @@",
+    },
+    {
+      id: "a-line",
+      kind: "context",
+      text: " alpha",
+      filePath: "src/a.ts",
+      oldLineNumber: 1,
+      newLineNumber: 1,
+      commentable: true,
+      hunkLabel: "@@ -1 +1 @@",
+    },
+    {
+      id: "b-meta",
+      kind: "meta",
+      text: "diff --git a/b.ts b/b.ts",
+      filePath: "src/b.ts",
+      commentable: false,
+    },
+    {
+      id: "b-hunk",
+      kind: "hunk",
+      text: "@@ -1 +1 @@",
+      filePath: "src/b.ts",
+      commentable: false,
+      hunkLabel: "@@ -1 +1 @@",
+    },
+    {
+      id: "b-line",
+      kind: "context",
+      text: " beta",
+      filePath: "src/b.ts",
+      oldLineNumber: 1,
+      newLineNumber: 1,
+      commentable: true,
+      hunkLabel: "@@ -1 +1 @@",
+    },
+  ];
+}
+
 function createComponent(
   lines: ReviewLine[],
   options: {
@@ -31,16 +86,19 @@ function createComponent(
     done?: (
       result: { action: "submit"; comments: any[] } | { action: "cancel" },
     ) => void;
+    theme?: ReviewTheme;
   } = {},
 ): ReviewComponent {
   const tui: ReviewTui = {
     requestRender: () => undefined,
     terminal: { rows: 24, columns: 100 },
   };
-  const theme: ReviewTheme = {
-    fg: (_token, text) => text,
-    bg: (_token, text) => text,
-  } as ReviewTheme;
+  const theme: ReviewTheme =
+    options.theme ??
+    ({
+      fg: (_token, text) => text,
+      bg: (_token, text) => text,
+    } as ReviewTheme);
 
   return new ReviewComponent(
     tui,
@@ -222,6 +280,53 @@ describe("ReviewComponent", () => {
 
     assert.match(output, /<fg:warning>needle/);
     assert.match(output, /<fg:accent>needle/);
+  });
+
+  it("focuses the current file and hides other files", () => {
+    const component = createComponent(buildMultiFileLines());
+
+    (component as any).selected = 2;
+    component.handleInput("f");
+    const output = component.render(100).join("\n");
+
+    assert.match(output, /src\/a\.ts/);
+    assert.doesNotMatch(output, /src\/b\.ts/);
+    assert.match(output, /\[focused\]/);
+  });
+
+  it("jumps between files with bracket keys", () => {
+    const component = createComponent(buildMultiFileLines());
+
+    (component as any).selected = 2;
+    component.handleInput("]");
+    assert.equal((component as any).selected, 5);
+
+    component.handleInput("[");
+    assert.equal((component as any).selected, 2);
+  });
+
+  it("renders a toggleable file sidebar with the current file highlighted", () => {
+    const component = createComponent(buildMultiFileLines(), {
+      theme: {
+        fg: (_token, text) => text,
+        bg: (token, text) => `<bg:${token}>${text}</bg:${token}>`,
+      } as ReviewTheme,
+    });
+
+    (component as any).selected = 2;
+    component.handleInput("t");
+    let output = component.render(100).join("\n");
+    assert.match(output, /src\/a\.ts/);
+    assert.match(output, /src\/b\.ts/);
+    assert.doesNotMatch(output, /Files/);
+    assert.match(
+      output,
+      /\n<bg:selectedBg>src\/a\.ts\s+\+0 -0<\/bg:selectedBg>/,
+    );
+
+    component.handleInput("]");
+    output = component.render(100).join("\n");
+    assert.match(output, /<bg:selectedBg>.*src\/b\.ts.*<\/bg:selectedBg>/);
   });
 
   it("q clears an active selection before exiting", () => {

@@ -28,6 +28,7 @@ import {
 import { formatCommentLocation, formatLocation } from "./prompt.ts";
 import { ReviewNavigationState } from "./navigation.ts";
 import { ReviewSearchState } from "./search.ts";
+import { buildReviewFileIndex, type ReviewFileSection } from "./files.ts";
 import { padToWidth, lineNumberCell } from "../render/utils.ts";
 import { buildSplitDiffRows } from "../diff/split.ts";
 import type {
@@ -53,6 +54,7 @@ type InlineBoxRow = {
 };
 
 type AnnotatedDiffRow =
+  | { kind: "file-header"; file: ReviewFileSection }
   | { kind: "diff"; lineIndex: number }
   | { kind: "split"; splitRowIndex: number }
   | InlineBoxRow;
@@ -63,6 +65,8 @@ const HELP_COMMANDS = [
   ["PgUp / PgDown", "move up or down half a page"],
   ["ctrl-u / ctrl-d", "move up or down half a page"],
   ["g / G", "jump to top or bottom"],
+  ["[ / ]", "jump to previous or next file"],
+  ["f", "focus or unfocus the current file"],
   ["n / p", "jump to next or previous hunk"],
   ["/", "search diff lines"],
   ["n / N", "jump between search matches"],
@@ -70,7 +74,8 @@ const HELP_COMMANDS = [
   ["c", "add or edit a line or range comment"],
   ["C", "add or edit an overall diff comment"],
   ["x", "delete the current line or range comment"],
-  ["t", "toggle inline comments and explanations"],
+  ["t", "toggle the file sidebar"],
+  ["s", "toggle inline comments and explanations"],
   ["v", "toggle unified or split rendering"],
   ["?", "toggle AI explanation for current hunk"],
   ["a", "ask a question about the current hunk"],
@@ -85,6 +90,7 @@ export class ReviewComponent {
   private editingCommentKey?: string;
   private search: ReviewSearchState;
   private helpVisible = false;
+  private fileSidebarVisible = false;
 
   private inlineAnnotationsVisible = true;
   private visibleExplanationKeys = new Set<string>();
@@ -95,6 +101,8 @@ export class ReviewComponent {
   private explanationController: ExplanationController;
   private editor: Editor;
   private splitRows?: SplitDiffRow[];
+  private readonly fileIndex: ReturnType<typeof buildReviewFileIndex>;
+  private focusedFilePath?: string;
   private lineIndexById = new Map<string, number>();
   private commentLineKeys = new Map<number, string[]>();
   private commentsRevision = 0;
@@ -133,7 +141,10 @@ export class ReviewComponent {
       firstCommentable >= 0 ? firstCommentable : 0,
     );
     this.lines.forEach((line, index) => this.lineIndexById.set(line.id, index));
-    this.search = new ReviewSearchState(this.lines);
+    this.fileIndex = buildReviewFileIndex(this.lines);
+    this.search = new ReviewSearchState(this.lines, (lineIndex) =>
+      this.isLineVisible(lineIndex),
+    );
 
     const restoredAsk = cachedAsk
       ? this.restorePersistedAsk(cachedAsk)
@@ -289,6 +300,11 @@ export class ReviewComponent {
         this.clearSearch();
       } else if (this.hasSelection()) {
         this.clearSelection();
+      } else if (this.focusedFilePath) {
+        this.focusedFilePath = undefined;
+        this.highlightedLineCache.clear();
+        this.invalidateAnnotatedRows();
+        this.tui.requestRender(true);
       } else {
         this.done({ action: "cancel" });
       }
@@ -307,7 +323,7 @@ export class ReviewComponent {
       return;
     }
     if (data === "t") {
-      this.toggleInlineAnnotations();
+      this.toggleFileSidebar();
       return;
     }
     if (data === "v") {
@@ -348,6 +364,22 @@ export class ReviewComponent {
     }
     if (data === "G") {
       this.jumpToBoundary("end");
+      return;
+    }
+    if (data === "[") {
+      this.jumpFile(-1);
+      return;
+    }
+    if (data === "]") {
+      this.jumpFile(1);
+      return;
+    }
+    if (data === "f") {
+      this.toggleCurrentFileFocus();
+      return;
+    }
+    if (data === "s") {
+      this.toggleInlineAnnotations();
       return;
     }
     if (data === "J") {
@@ -409,8 +441,24 @@ export class ReviewComponent {
       ),
     );
 
-    this.ensureScroll(viewportHeight, width);
-    output.push(...this.renderAnnotatedDiffRows(width, viewportHeight));
+    const sidebarWidth = this.getFileSidebarWidth(width);
+    const contentWidth = Math.max(10, width - sidebarWidth);
+    this.ensureScroll(viewportHeight, contentWidth);
+    const bodyRows = this.renderAnnotatedDiffRows(contentWidth, viewportHeight);
+    const sidebarRows =
+      sidebarWidth > 0
+        ? this.renderFileSidebar(sidebarWidth, viewportHeight)
+        : undefined;
+
+    for (let index = 0; index < viewportHeight; index++) {
+      const body = bodyRows[index] ?? " ".repeat(contentWidth);
+      if (!sidebarRows) {
+        output.push(body);
+        continue;
+      }
+      const sidebar = sidebarRows[index] ?? " ".repeat(sidebarWidth);
+      output.push(truncateToWidth(`${sidebar}${body}`, width));
+    }
 
     output.push(
       truncateToWidth(
@@ -428,7 +476,9 @@ export class ReviewComponent {
     selectedLine?: ReviewLine,
     workspaceSummary?: WorkspaceCommentSummary,
   ): string {
-    const base = `${this.title} • ${this.lines.length} lines • ${this.comments.size} comments${this.formatWorkspaceSummary(workspaceSummary)}`;
+    const visibleLineCount = this.getVisibleLineIndexes().length;
+    const summaryCount = this.explanationController.explanations.size;
+    const base = `${visibleLineCount}/${this.lines.length} lines • ${this.fileIndex.sections.length} files • ${this.comments.size} comments • ${summaryCount} summaries${this.formatWorkspaceSummary(workspaceSummary)}`;
 
     if (this.editMode) {
       return `${base} • editing ${this.editingCommentKey === GLOBAL_COMMENT_KEY ? "overall comment" : "inline comment"}`;
@@ -438,7 +488,10 @@ export class ReviewComponent {
       return `${base} • selection active`;
     }
 
-    return `${base} • ${this.getPositionText(selectedLine)} • inline ${this.inlineAnnotationsVisible ? "shown" : "hidden"} • ${this.diffRenderMode}`;
+    const focusText = this.focusedFilePath
+      ? ` • focus ${this.focusedFilePath}`
+      : "";
+    return `${base}${focusText}`;
   }
 
   private renderStatusLine(left: string, right: string, width: number): string {
@@ -561,6 +614,11 @@ export class ReviewComponent {
         continue;
       }
 
+      if (annotated.kind === "file-header") {
+        output.push(this.renderFileHeaderRow(annotated.file, width));
+        continue;
+      }
+
       if (annotated.kind === "diff") {
         const index = annotated.lineIndex;
         const line = this.lines[index]!;
@@ -601,7 +659,8 @@ export class ReviewComponent {
         this.visibleExplanationKeys.size &&
       this.visibleExplanationKeys.size === 0 &&
       !this.askInputMode &&
-      !this.askScope
+      !this.askScope &&
+      this.focusedFilePath == null
     ) {
       return this.annotatedRows;
     }
@@ -635,15 +694,22 @@ export class ReviewComponent {
     rowByLineIndex: number[],
     width: number,
   ): void {
-    for (let index = 0; index < this.lines.length; index++) {
-      rowByLineIndex[index] = rows.length;
-      rows.push({ kind: "diff", lineIndex: index });
+    for (const file of this.getVisibleFileSections()) {
+      rows.push({ kind: "file-header", file });
+      for (
+        let index = file.startLineIndex;
+        index <= file.endLineIndex;
+        index++
+      ) {
+        rowByLineIndex[index] = rows.length;
+        rows.push({ kind: "diff", lineIndex: index });
 
-      if (!this.inlineAnnotationsVisible) continue;
+        if (!this.inlineAnnotationsVisible) continue;
 
-      this.pushInlineCommentRows(rows, index, width);
-      this.pushInlineEditorRows(rows, index, width);
-      this.pushInlineExplanationRows(rows, index, width);
+        this.pushInlineCommentRows(rows, index, width);
+        this.pushInlineEditorRows(rows, index, width);
+        this.pushInlineExplanationRows(rows, index, width);
+      }
     }
   }
 
@@ -653,24 +719,31 @@ export class ReviewComponent {
     width: number,
   ): void {
     const splitRows = this.getSplitDiffRows();
-    for (
-      let splitRowIndex = 0;
-      splitRowIndex < splitRows.length;
-      splitRowIndex++
-    ) {
-      const splitRow = splitRows[splitRowIndex]!;
-      const lineIndexes = this.getLineIndexesForSplitRow(splitRow);
-      for (const lineIndex of lineIndexes) {
-        rowByLineIndex[lineIndex] = rows.length;
-      }
+    for (const file of this.getVisibleFileSections()) {
+      rows.push({ kind: "file-header", file });
+      for (
+        let splitRowIndex = 0;
+        splitRowIndex < splitRows.length;
+        splitRowIndex++
+      ) {
+        const splitRow = splitRows[splitRowIndex]!;
+        const lineIndexes = this.getLineIndexesForSplitRow(splitRow).filter(
+          (lineIndex) =>
+            lineIndex >= file.startLineIndex && lineIndex <= file.endLineIndex,
+        );
+        if (lineIndexes.length === 0) continue;
+        for (const lineIndex of lineIndexes) {
+          rowByLineIndex[lineIndex] = rows.length;
+        }
 
-      rows.push({ kind: "split", splitRowIndex });
-      if (!this.inlineAnnotationsVisible) continue;
+        rows.push({ kind: "split", splitRowIndex });
+        if (!this.inlineAnnotationsVisible) continue;
 
-      for (const lineIndex of lineIndexes) {
-        this.pushInlineCommentRows(rows, lineIndex, width);
-        this.pushInlineEditorRows(rows, lineIndex, width);
-        this.pushInlineExplanationRows(rows, lineIndex, width);
+        for (const lineIndex of lineIndexes) {
+          this.pushInlineCommentRows(rows, lineIndex, width);
+          this.pushInlineEditorRows(rows, lineIndex, width);
+          this.pushInlineExplanationRows(rows, lineIndex, width);
+        }
       }
     }
   }
@@ -946,6 +1019,107 @@ export class ReviewComponent {
     return Math.max(10, width - 8);
   }
 
+  private renderFileHeaderRow(file: ReviewFileSection, width: number): string {
+    const selected = this.getCurrentFileSection()?.filePath === file.filePath;
+    const focused = this.focusedFilePath === file.filePath;
+    const summary = ` ${file.filePath}  +${file.additions} -${file.deletions}${file.hunks > 0 ? `  ${file.hunks} hunk${file.hunks === 1 ? "" : "s"}` : ""}${focused ? "  [focused]" : ""}`;
+    const text = padToWidth(
+      truncateToWidth(this.theme.fg("accent", summary), width),
+      width,
+    );
+    return selected ? this.theme.bg("selectedBg", text) : text;
+  }
+
+  private getFileSidebarWidth(width: number): number {
+    if (!this.fileSidebarVisible || width < 60) return 0;
+    return Math.max(20, Math.min(36, Math.floor(width * 0.3)));
+  }
+
+  private renderFileSidebar(width: number, height: number): string[] {
+    const files = this.fileIndex.sections;
+    const current = this.getCurrentFileSection()?.filePath;
+    const currentIndex = Math.max(
+      0,
+      files.findIndex((file) => file.filePath === current),
+    );
+    const visibleHeight = Math.max(0, height);
+    const maxScrollTop = Math.max(0, files.length - visibleHeight);
+    const scrollTop = Math.max(
+      0,
+      Math.min(
+        Math.max(0, currentIndex - Math.floor(visibleHeight / 2)),
+        maxScrollTop,
+      ),
+    );
+
+    const rows: string[] = [];
+
+    for (let row = 0; row < visibleHeight; row++) {
+      const file = files[scrollTop + row];
+      if (!file) {
+        rows.push(" ".repeat(width));
+        continue;
+      }
+      const selected = file.filePath === current;
+      const focused = file.filePath === this.focusedFilePath;
+      const label = file.filePath;
+      const countSuffix = focused ? " *" : "";
+      const added = this.theme.fg("toolDiffAdded", `+${file.additions}`);
+      const removed = this.theme.fg("toolDiffRemoved", `-${file.deletions}`);
+      const counts = `${added} ${removed}${countSuffix}`;
+      const rightWidth = visibleWidth(counts);
+      const leftWidth = Math.max(0, width - rightWidth - 1);
+      const line = `${padToWidth(truncateToWidth(label, leftWidth), leftWidth)} ${counts}`;
+      const padded = padToWidth(truncateToWidth(line, width), width);
+      rows.push(selected ? this.theme.bg("selectedBg", padded) : padded);
+    }
+
+    return rows.slice(0, height);
+  }
+
+  private getVisibleFileSections(): ReviewFileSection[] {
+    return this.focusedFilePath
+      ? this.fileIndex.sections.filter(
+          (section) => section.filePath === this.focusedFilePath,
+        )
+      : this.fileIndex.sections;
+  }
+
+  private getVisibleLineIndexes(): number[] {
+    const indexes: number[] = [];
+    for (const file of this.getVisibleFileSections()) {
+      for (
+        let index = file.startLineIndex;
+        index <= file.endLineIndex;
+        index++
+      ) {
+        indexes.push(index);
+      }
+    }
+    return indexes;
+  }
+
+  private isLineVisible(lineIndex: number): boolean {
+    const line = this.lines[lineIndex];
+    if (!line?.filePath) return this.focusedFilePath == null;
+    return !this.focusedFilePath || line.filePath === this.focusedFilePath;
+  }
+
+  private getCurrentFileSection(): ReviewFileSection | undefined {
+    const current = this.fileIndex.sectionIndexByLine[this.selected];
+    return current == null || current < 0
+      ? undefined
+      : this.fileIndex.sections[current];
+  }
+
+  private ensureSelectedVisible(): void {
+    if (this.isLineVisible(this.selected)) return;
+    const file = this.getVisibleFileSections()[0];
+    const target =
+      file?.firstCommentableLineIndex ?? this.getVisibleLineIndexes()[0];
+    if (target != null) this.navigation.setSelected(target);
+  }
+
   private invalidateAnnotatedRows(): void {
     this.annotatedRows = undefined;
     this.annotatedRowByLineIndex = undefined;
@@ -1090,14 +1264,61 @@ export class ReviewComponent {
   }
 
   private move(delta: number): void {
-    if (!this.navigation.move(delta)) return;
+    const visible = this.getVisibleLineIndexes();
+    if (visible.length === 0) return;
+    this.ensureSelectedVisible();
+    const currentIndex = Math.max(0, visible.indexOf(this.selected));
+    const next =
+      visible[Math.max(0, Math.min(visible.length - 1, currentIndex + delta))];
+    if (next == null || !this.navigation.setSelected(next)) return;
     this.tui.requestRender();
   }
 
   private jumpToBoundary(boundary: "start" | "end"): void {
-    const result = this.navigation.jumpToBoundary(boundary);
+    const visible = this.getVisibleLineIndexes();
+    if (visible.length === 0) return;
+    const next =
+      boundary === "start" ? visible[0] : visible[visible.length - 1];
+    if (next == null) return;
+    const result = this.navigation.jumpToIndex(next);
     if (!result.changed) return;
     this.tui.requestRender();
+  }
+
+  private jumpFile(direction: 1 | -1): void {
+    const files = this.getVisibleFileSections();
+    if (files.length === 0) return;
+    const current = this.getCurrentFileSection();
+    const currentIndex = current
+      ? files.findIndex((file) => file.filePath === current.filePath)
+      : -1;
+    const nextIndex =
+      currentIndex >= 0
+        ? Math.max(0, Math.min(files.length - 1, currentIndex + direction))
+        : direction === 1
+          ? 0
+          : files.length - 1;
+    const next = files[nextIndex];
+    if (!next) return;
+    this.navigation.jumpToIndex(next.firstCommentableLineIndex);
+    this.tui.requestRender(true);
+  }
+
+  private toggleCurrentFileFocus(): void {
+    const current = this.getCurrentFileSection();
+    if (!current) return;
+    this.focusedFilePath =
+      this.focusedFilePath === current.filePath ? undefined : current.filePath;
+    this.ensureSelectedVisible();
+    this.highlightedLineCache.clear();
+    this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
+  }
+
+  private toggleFileSidebar(): void {
+    this.fileSidebarVisible = !this.fileSidebarVisible;
+    this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
   }
 
   private toggleDiffRenderMode(): void {
@@ -1144,7 +1365,13 @@ export class ReviewComponent {
   }
 
   private extendSelection(delta: number): void {
-    if (!this.navigation.extendSelection(delta)) return;
+    const visible = this.getVisibleLineIndexes();
+    if (visible.length === 0) return;
+    this.ensureSelectedVisible();
+    const currentIndex = Math.max(0, visible.indexOf(this.selected));
+    const next =
+      visible[Math.max(0, Math.min(visible.length - 1, currentIndex + delta))];
+    if (next == null || !this.navigation.extendSelectionTo(next)) return;
     this.tui.requestRender();
   }
 
@@ -1214,9 +1441,15 @@ export class ReviewComponent {
   }
 
   private getPositionText(selectedLine?: ReviewLine): string {
-    const position = `${Math.min(this.selected + 1, this.lines.length)}/${this.lines.length}`;
+    const visible = this.getVisibleLineIndexes();
+    const visiblePosition = Math.max(0, visible.indexOf(this.selected)) + 1;
+    const position = `${visiblePosition}/${Math.max(visible.length, 1)}`;
+    const file = this.getCurrentFileSection();
+    const filePosition = file
+      ? `${this.fileIndex.sections.findIndex((section) => section.filePath === file.filePath) + 1}/${this.fileIndex.sections.length}`
+      : undefined;
     return selectedLine?.filePath
-      ? `${position} ${selectedLine.filePath}`
+      ? `${position}${filePosition ? ` • file ${filePosition}` : ""} ${selectedLine.filePath}`
       : position;
   }
 
@@ -1239,9 +1472,8 @@ export class ReviewComponent {
       return `Selected ${count} lines: ${formatLocation(startLine)} -> ${formatLocation(endLine)}`;
     }
 
-    const selectedText = `Selected: ${selectedLine ? formatLocation(selectedLine) : "(no selection)"}`;
     const workspaceText = this.formatWorkspaceSummary(workspaceSummary, false);
-    return workspaceText ? `${selectedText} • ${workspaceText}` : selectedText;
+    return workspaceText ? workspaceText.slice(3) : "";
   }
 
   private formatWorkspaceSummary(
@@ -1265,7 +1497,7 @@ export class ReviewComponent {
   private jumpHunk(direction: 1 | -1): void {
     let index = this.selected + direction;
     while (index >= 0 && index < this.lines.length) {
-      if (this.lines[index]?.kind === "hunk") {
+      if (this.isLineVisible(index) && this.lines[index]?.kind === "hunk") {
         this.selected = index;
         this.tui.requestRender();
         return;
