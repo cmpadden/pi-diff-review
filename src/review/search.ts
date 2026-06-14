@@ -26,7 +26,10 @@ export class ReviewSearchState {
   private _query = "";
   private activeMatchIndex = -1;
 
-  constructor(private readonly lines: ReviewLine[]) {}
+  constructor(
+    private readonly lines: ReviewLine[],
+    private readonly isLineVisible: (lineIndex: number) => boolean = () => true,
+  ) {}
 
   get query(): string {
     return this._query;
@@ -160,6 +163,7 @@ export class ReviewSearchState {
 
     const matches: SearchMatch[] = [];
     this.lines.forEach((line, lineIndex) => {
+      if (!this.isLineVisible(lineIndex)) return;
       const haystack = getSearchableLineText(line);
       let start = haystack.indexOf(needle);
       while (start >= 0) {

@@ -82,13 +82,18 @@ Open one or more files or folders with `/view`:
 - `h` toggles the command help modal
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff
+- `[/]` to jump to the previous or next file
+- `f` to focus the current file, or clear file focus
+- `t` toggles the left file sidebar
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
-- `t` toggles inline comments/explanations
+- `s` toggles inline comments/explanations
 - `v` toggles the diff between unified and side-by-side split rendering
 - `?` toggles an AI-generated explanation for the current hunk
 - `/` searches visible diff text, highlights matches, and `n/N` moves between them while a search is active
 - `J/K` to extend a highlighted selection into a comment range
 - `esc` clears the active selection, or exits review when no selection is active
+- File headers break the review into per-file sections with change counts
+- Optional left sidebar lists files with `+/-` counts and tracks the current file
 - `n/p` to jump hunks
 - `c` to add or edit a comment for the current line or selected range
 - `C` to add or edit an overall diff comment

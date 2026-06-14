@@ -61,4 +61,3 @@ The GitHub Actions release workflow will:
 4. Pack the npm package.
 5. Publish the package to npm with provenance.
 6. Create a GitHub Release for the tag with the packed tarball attached.
-
