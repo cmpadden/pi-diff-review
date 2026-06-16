@@ -90,7 +90,7 @@ export class ReviewComponent {
   private editingCommentKey?: string;
   private search: ReviewSearchState;
   private helpVisible = false;
-  private fileSidebarVisible = false;
+  private fileSidebarVisible = true;
 
   private inlineAnnotationsVisible = true;
   private visibleExplanationKeys = new Set<string>();

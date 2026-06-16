@@ -274,6 +274,7 @@ describe("ReviewComponent", () => {
       () => undefined,
     );
 
+    highlightedComponent.handleInput("t");
     (highlightedComponent as any).search.query = "needle";
     (highlightedComponent as any).search.jump(1, 0);
     const output = highlightedComponent.render(200).join("\n");
@@ -287,6 +288,7 @@ describe("ReviewComponent", () => {
 
     (component as any).selected = 2;
     component.handleInput("f");
+    component.handleInput("t");
     const output = component.render(100).join("\n");
 
     assert.match(output, /src\/a\.ts/);
@@ -314,15 +316,11 @@ describe("ReviewComponent", () => {
     });
 
     (component as any).selected = 2;
-    component.handleInput("t");
     let output = component.render(100).join("\n");
     assert.match(output, /src\/a\.ts/);
     assert.match(output, /src\/b\.ts/);
     assert.doesNotMatch(output, /Files/);
-    assert.match(
-      output,
-      /\n<bg:selectedBg>src\/a\.ts\s+\+0 -0<\/bg:selectedBg>/,
-    );
+    assert.match(output, /<bg:selectedBg> src\/a\.ts  \+0 -0/);
 
     component.handleInput("]");
     output = component.render(100).join("\n");
