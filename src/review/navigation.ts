@@ -10,6 +10,7 @@ export class ReviewNavigationState {
   scrollTop = 0;
   selectionAnchor?: number;
   diffRenderMode: DiffRenderMode = "unified";
+  lineWrapEnabled = false;
 
   constructor(
     private readonly lineCount: number,
@@ -82,6 +83,12 @@ export class ReviewNavigationState {
       this.diffRenderMode === "unified" ? "split" : "unified";
     this.scrollTop = 0;
     return this.diffRenderMode;
+  }
+
+  toggleLineWrap(): boolean {
+    this.lineWrapEnabled = !this.lineWrapEnabled;
+    this.scrollTop = 0;
+    return this.lineWrapEnabled;
   }
 
   ensureScroll(
