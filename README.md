@@ -1,10 +1,14 @@
-<img width="1400" height="225" alt="pi-diff-review" src="https://github.com/user-attachments/assets/049b2df9-ec38-4a9a-a824-8d682e77dae1" />
 
-# pi-diff-review
 
-Embedded code reviews and AI summaries directly within [pi](https://pi.dev/).
-
-<img width="1986" height="1556" alt="pi-diff-review-screenshot" src="https://github.com/user-attachments/assets/5ddd7226-28d4-4617-8c5c-35b4b6af68dc" />
+<div align="center">
+  <div>
+    <img height="96" alt="pi-diff-review" src="https://github.com/user-attachments/assets/7b97e6a2-9dc3-49f8-b932-f8a90a59bfcf" />
+  </div>
+  <b><i>Embedded code reviews and explanations directly within <a href="https://pi.dev">pi</a>.</i></b>
+  <div>
+    <img width="728" alt="image" src="https://github.com/user-attachments/assets/6bb72e25-369e-446b-888d-1561005c427e" />
+  </div>
+</div>
 
 ## Install
 
