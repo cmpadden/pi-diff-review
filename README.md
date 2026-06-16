@@ -1,5 +1,3 @@
-
-
 <div align="center">
   <div>
     <img height="96" alt="pi-diff-review" src="https://github.com/user-attachments/assets/7b97e6a2-9dc3-49f8-b932-f8a90a59bfcf" />
