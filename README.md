@@ -88,6 +88,7 @@ Open one or more files or folders with `/view`:
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
 - `s` toggles inline comments/explanations
 - `v` toggles the diff between unified and side-by-side split rendering
+- `w` toggles line wrap for long diff lines
 - `?` toggles an AI-generated explanation for the current hunk
 - `/` searches visible diff text, highlights matches, and `n/N` moves between them while a search is active
 - `J/K` to extend a highlighted selection into a comment range

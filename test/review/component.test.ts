@@ -327,6 +327,33 @@ describe("ReviewComponent", () => {
     assert.match(output, /<bg:selectedBg>.*src\/b\.ts.*<\/bg:selectedBg>/);
   });
 
+  it("toggles line wrap for long diff lines", () => {
+    const component = createComponent([
+      {
+        id: "long-line",
+        kind: "context",
+        text: ` ${"x".repeat(80)}`,
+        filePath: "src/example.ts",
+        oldLineNumber: 1,
+        newLineNumber: 1,
+        commentable: true,
+        hunkLabel: "@@ -1 +1 @@",
+      },
+    ]);
+
+    const unwrappedRows = (component as any)
+      .getAnnotatedRows(30)
+      .filter((row: any) => row.kind === "diff" && row.lineIndex === 0);
+    assert.equal(unwrappedRows.length, 1);
+
+    component.handleInput("w");
+
+    const wrappedRows = (component as any)
+      .getAnnotatedRows(30)
+      .filter((row: any) => row.kind === "diff" && row.lineIndex === 0);
+    assert.ok(wrappedRows.length > 1);
+  });
+
   it("q clears an active selection before exiting", () => {
     let result:
       | { action: "submit"; comments: any[] }

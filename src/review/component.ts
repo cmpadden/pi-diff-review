@@ -55,8 +55,8 @@ type InlineBoxRow = {
 
 type AnnotatedDiffRow =
   | { kind: "file-header"; file: ReviewFileSection }
-  | { kind: "diff"; lineIndex: number }
-  | { kind: "split"; splitRowIndex: number }
+  | { kind: "diff"; lineIndex: number; segmentIndex: number }
+  | { kind: "split"; splitRowIndex: number; segmentIndex: number }
   | InlineBoxRow;
 
 const HELP_COMMANDS = [
@@ -77,6 +77,7 @@ const HELP_COMMANDS = [
   ["t", "toggle the file sidebar"],
   ["s", "toggle inline comments and explanations"],
   ["v", "toggle unified or split rendering"],
+  ["w", "toggle line wrap for long diff lines"],
   ["?", "toggle AI explanation for current hunk"],
   ["a", "ask a question about the current hunk"],
   ["Enter", "submit comments, save edits, or jump to search result"],
@@ -114,6 +115,7 @@ export class ReviewComponent {
   private annotatedRowsEditMode = false;
   private annotatedRowsEditingCommentKey?: string;
   private annotatedRowsMode?: DiffRenderMode;
+  private annotatedRowsLineWrapEnabled = false;
   private annotatedRowsInlineAnnotationsVisible = true;
   private annotatedRowsVisibleExplanationCount = 0;
   private annotatedRowByLineIndex?: number[];
@@ -258,6 +260,10 @@ export class ReviewComponent {
     return this.navigation.diffRenderMode;
   }
 
+  private get lineWrapEnabled(): boolean {
+    return this.navigation.lineWrapEnabled;
+  }
+
   handleInput(data: string): void {
     if (this.helpVisible) {
       if (data === "h" || matchesKey(data, "escape")) {
@@ -328,6 +334,10 @@ export class ReviewComponent {
     }
     if (data === "v") {
       this.toggleDiffRenderMode();
+      return;
+    }
+    if (data === "w") {
+      this.toggleLineWrap();
       return;
     }
     if (data === "?") {
@@ -626,6 +636,7 @@ export class ReviewComponent {
           this.renderDiffLine(
             line,
             index,
+            annotated.segmentIndex,
             width,
             index === this.selected,
             this.getSelectionBounds(),
@@ -635,7 +646,13 @@ export class ReviewComponent {
       }
 
       if (annotated.kind === "split") {
-        output.push(this.renderSplitDiffRowAt(annotated.splitRowIndex, width));
+        output.push(
+          this.renderSplitDiffRowAt(
+            annotated.splitRowIndex,
+            annotated.segmentIndex,
+            width,
+          ),
+        );
         continue;
       }
 
@@ -653,6 +670,7 @@ export class ReviewComponent {
       this.annotatedRowsEditMode === this.editMode &&
       this.annotatedRowsEditingCommentKey === this.editingCommentKey &&
       this.annotatedRowsMode === this.diffRenderMode &&
+      this.annotatedRowsLineWrapEnabled === this.lineWrapEnabled &&
       this.annotatedRowsInlineAnnotationsVisible ===
         this.inlineAnnotationsVisible &&
       this.annotatedRowsVisibleExplanationCount ===
@@ -682,6 +700,7 @@ export class ReviewComponent {
     this.annotatedRowsEditMode = this.editMode;
     this.annotatedRowsEditingCommentKey = this.editingCommentKey;
     this.annotatedRowsMode = this.diffRenderMode;
+    this.annotatedRowsLineWrapEnabled = this.lineWrapEnabled;
     this.annotatedRowsInlineAnnotationsVisible = this.inlineAnnotationsVisible;
     this.annotatedRowsVisibleExplanationCount =
       this.visibleExplanationKeys.size;
@@ -702,7 +721,18 @@ export class ReviewComponent {
         index++
       ) {
         rowByLineIndex[index] = rows.length;
-        rows.push({ kind: "diff", lineIndex: index });
+        const segmentCount = this.getDiffRowSegmentCount(
+          this.lines[index]!,
+          index,
+          width,
+        );
+        for (
+          let segmentIndex = 0;
+          segmentIndex < segmentCount;
+          segmentIndex++
+        ) {
+          rows.push({ kind: "diff", lineIndex: index, segmentIndex });
+        }
 
         if (!this.inlineAnnotationsVisible) continue;
 
@@ -736,7 +766,14 @@ export class ReviewComponent {
           rowByLineIndex[lineIndex] = rows.length;
         }
 
-        rows.push({ kind: "split", splitRowIndex });
+        const segmentCount = this.getSplitRowSegmentCount(splitRow, width);
+        for (
+          let segmentIndex = 0;
+          segmentIndex < segmentCount;
+          segmentIndex++
+        ) {
+          rows.push({ kind: "split", splitRowIndex, segmentIndex });
+        }
         if (!this.inlineAnnotationsVisible) continue;
 
         for (const lineIndex of lineIndexes) {
@@ -1183,7 +1220,11 @@ export class ReviewComponent {
     );
   }
 
-  private renderSplitDiffRowAt(splitRowIndex: number, width: number): string {
+  private renderSplitDiffRowAt(
+    splitRowIndex: number,
+    segmentIndex: number,
+    width: number,
+  ): string {
     const splitRow = this.getSplitDiffRows()[splitRowIndex];
     if (!splitRow) return " ".repeat(width);
 
@@ -1191,6 +1232,7 @@ export class ReviewComponent {
       return this.renderDiffLine(
         splitRow.cell.line,
         splitRow.cell.index,
+        segmentIndex,
         width,
         splitRow.cell.index === this.selected,
         this.getSelectionBounds(),
@@ -1201,15 +1243,151 @@ export class ReviewComponent {
     const leftWidth = Math.max(10, Math.floor((width - separatorWidth) / 2));
     const rightWidth = Math.max(10, width - leftWidth - separatorWidth);
     const left = splitRow.left
-      ? this.renderSplitDiffCell(splitRow.left, leftWidth, "left")
+      ? this.renderSplitDiffCell(splitRow.left, leftWidth, "left", segmentIndex)
       : " ".repeat(leftWidth);
     const right = splitRow.right
-      ? this.renderSplitDiffCell(splitRow.right, rightWidth, "right")
+      ? this.renderSplitDiffCell(
+          splitRow.right,
+          rightWidth,
+          "right",
+          segmentIndex,
+        )
       : " ".repeat(rightWidth);
     return truncateToWidth(
       `${padToWidth(left, leftWidth)}${this.theme.fg("borderMuted", " │ ")}${padToWidth(right, rightWidth)}`,
       width,
     );
+  }
+
+  private getDiffRowSegmentCount(
+    line: ReviewLine,
+    index: number,
+    width: number,
+  ): number {
+    return this.getDiffRowSegments(line, index, width).length;
+  }
+
+  private getSplitRowSegmentCount(row: SplitDiffRow, width: number): number {
+    if (row.kind === "full") {
+      return this.getDiffRowSegmentCount(row.cell.line, row.cell.index, width);
+    }
+
+    const separatorWidth = 3;
+    const leftWidth = Math.max(10, Math.floor((width - separatorWidth) / 2));
+    const rightWidth = Math.max(10, width - leftWidth - separatorWidth);
+    return Math.max(
+      row.left
+        ? this.getSplitDiffCellSegments(row.left, leftWidth, "left").length
+        : 1,
+      row.right
+        ? this.getSplitDiffCellSegments(row.right, rightWidth, "right").length
+        : 1,
+    );
+  }
+
+  private getDiffRowSegments(
+    line: ReviewLine,
+    index: number,
+    width: number,
+  ): string[] {
+    const hasComment = this.getCommentKeysForLine(index).length > 0;
+    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
+    const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
+    const prefix = this.styleDiffPrefix(line, `${commentMark} ${numbers} `);
+    const continuationPrefix = this.styleDiffPrefix(
+      line,
+      `${commentMark} ${lineNumberCell()} ${lineNumberCell()} `,
+    );
+    return this.wrapDiffContentSegments(
+      this.getRenderedDiffContent(line, index),
+      prefix,
+      continuationPrefix,
+      width,
+    );
+  }
+
+  private getSplitDiffCellSegments(
+    cell: SplitDiffCell,
+    width: number,
+    side: "left" | "right",
+  ): string[] {
+    const { line, index } = cell;
+    const hasComment = this.getCommentKeysForLine(index).length > 0;
+    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
+    const lineNumber =
+      side === "left" ? line.oldLineNumber : line.newLineNumber;
+    const prefix = this.styleDiffPrefix(
+      line,
+      `${commentMark} ${lineNumberCell(lineNumber)} `,
+    );
+    const continuationPrefix = this.styleDiffPrefix(
+      line,
+      `${commentMark} ${lineNumberCell()} `,
+    );
+    return this.wrapDiffContentSegments(
+      this.getRenderedDiffContent(line, index),
+      prefix,
+      continuationPrefix,
+      width,
+    );
+  }
+
+  private getRenderedDiffContent(line: ReviewLine, index: number): string {
+    switch (line.kind) {
+      case "add":
+      case "remove":
+      case "context":
+        return this.getHighlightedDisplayText(line, index);
+      case "hunk":
+        return this.theme.fg("accent", this.getDisplayText(line));
+      default:
+        return this.theme.fg("muted", this.getDisplayText(line));
+    }
+  }
+
+  private styleDiffPrefix(line: ReviewLine, text: string): string {
+    switch (line.kind) {
+      case "add":
+        return this.theme.fg("toolDiffAdded", text);
+      case "remove":
+        return this.theme.fg("toolDiffRemoved", text);
+      case "context":
+        return this.theme.fg("toolDiffContext", text);
+      case "hunk":
+        return this.theme.fg("accent", text);
+      default:
+        return this.theme.fg("muted", text);
+    }
+  }
+
+  private wrapDiffContentSegments(
+    content: string,
+    prefix: string,
+    continuationPrefix: string,
+    width: number,
+  ): string[] {
+    const firstLineWidth = Math.max(1, width - visibleWidth(prefix));
+    const continuationWidth = Math.max(
+      1,
+      width - visibleWidth(continuationPrefix),
+    );
+
+    if (!this.lineWrapEnabled) {
+      return [`${prefix}${truncateToWidth(content, firstLineWidth)}`];
+    }
+
+    const firstSegments = wrapTextWithAnsi(content, firstLineWidth);
+    if (firstSegments.length === 0) return [prefix];
+    if (firstSegments.length === 1) return [`${prefix}${firstSegments[0]}`];
+
+    const [firstSegment, ...remaining] = firstSegments;
+    const wrapped = [`${prefix}${firstSegment}`];
+    for (const segment of remaining) {
+      for (const continuation of wrapTextWithAnsi(segment, continuationWidth)) {
+        wrapped.push(`${continuationPrefix}${continuation}`);
+      }
+    }
+    return wrapped;
   }
 
   private getContentHeight(): number {
@@ -1323,6 +1501,12 @@ export class ReviewComponent {
 
   private toggleDiffRenderMode(): void {
     this.navigation.toggleDiffRenderMode();
+    this.tui.requestRender(true);
+  }
+
+  private toggleLineWrap(): void {
+    this.navigation.toggleLineWrap();
+    this.invalidateAnnotatedRows();
     this.tui.requestRender(true);
   }
 
@@ -1600,16 +1784,12 @@ export class ReviewComponent {
     cell: SplitDiffCell,
     width: number,
     side: "left" | "right",
+    segmentIndex: number,
   ): string {
     const { line, index } = cell;
-    const hasComment = this.getCommentKeysForLine(index).length > 0;
-    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
-    const lineNumber =
-      side === "left" ? line.oldLineNumber : line.newLineNumber;
-    const prefix = `${commentMark} ${lineNumberCell(lineNumber)} `;
-    let styled = this.renderDiffRowContent(line, prefix, index);
-
-    styled = truncateToWidth(styled, width);
+    const styled =
+      this.getSplitDiffCellSegments(cell, width, side)[segmentIndex] ??
+      " ".repeat(width);
     const selection = this.getSelectionBounds();
     const inSelection =
       selection != null && index >= selection.start && index <= selection.end;
@@ -1734,17 +1914,14 @@ export class ReviewComponent {
   private renderDiffLine(
     line: ReviewLine,
     index: number,
+    segmentIndex: number,
     width: number,
     selected: boolean,
     selection?: SelectionBounds,
   ): string {
-    const hasComment = this.getCommentKeysForLine(index).length > 0;
-    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
-    const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
-    const prefix = `${commentMark} ${numbers} `;
-    let styled = this.renderDiffRowContent(line, prefix, index);
-
-    styled = truncateToWidth(styled, width);
+    const styled =
+      this.getDiffRowSegments(line, index, width)[segmentIndex] ??
+      " ".repeat(width);
     const inSelection =
       selection != null && index >= selection.start && index <= selection.end;
     if (selected || inSelection) {

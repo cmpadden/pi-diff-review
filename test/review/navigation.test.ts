@@ -34,6 +34,15 @@ describe("ReviewNavigationState", () => {
     assert.equal(state.toggleDiffRenderMode(), "unified");
   });
 
+  it("resets scroll when toggling line wrap", () => {
+    const state = new ReviewNavigationState(5, 0);
+    state.scrollTop = 3;
+
+    assert.equal(state.toggleLineWrap(), true);
+    assert.equal(state.scrollTop, 0);
+    assert.equal(state.toggleLineWrap(), false);
+  });
+
   it("keeps the selected display row inside the viewport", () => {
     const state = new ReviewNavigationState(100, 0);
 
