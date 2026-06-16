@@ -61,6 +61,18 @@ Review a single file by using a git pathspec after `--`. Pi path autocomplete wo
 
 `/diff <git-diff-args>` is passed through to `git diff`, so these examples are equivalent to running `git diff`, `git diff --cached`, and `git diff main...HEAD` locally before opening the review UI.
 
+Experimental: track reviewed turns while keeping the full overall diff visible:
+
+```text
+/diff --turn-based
+/diff --cached --turn-based
+/diff main...HEAD --turn-based -- @src/index.ts
+```
+
+Press `M` in a turn-based review to toggle the current hunk as reviewed. Later
+runs show the requested overall diff and render reviewed changed lines with a
+muted blue overlay.
+
 Open one or more files or folders with `/view`:
 
 ```text
@@ -83,6 +95,7 @@ Open one or more files or folders with `/view`:
 - `/diff --cached` reviews staged changes
 - `/diff main...HEAD` reviews changes on the current branch relative to `main`
 - `/diff <git-diff-args>` passes arguments through to `git diff`
+- `/diff --turn-based` enables experimental reviewed-turn overlays with `M`
 - `h` toggles the command help modal
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff

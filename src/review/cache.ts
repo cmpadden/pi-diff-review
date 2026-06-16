@@ -2,11 +2,17 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import type { PersistedAsk, ReviewComment } from "./types.ts";
+import type {
+  PersistedAsk,
+  ReviewComment,
+  ReviewLine,
+  ReviewSnapshotLine,
+} from "./types.ts";
 
 const REVIEW_COMMENT_CACHE_ENTRY = "pi-diff-review-cache";
 const REVIEW_EXPLANATION_CACHE_ENTRY = "pi-diff-review-explanation-cache";
 const REVIEW_ASK_CACHE_ENTRY = "pi-diff-review-ask-cache";
+const REVIEW_SNAPSHOT_CACHE_ENTRY = "pi-diff-review-snapshot-cache";
 
 type ReviewCommentCacheEntry = {
   cacheKey: string;
@@ -23,6 +29,12 @@ type ReviewExplanationCacheEntry = {
 type ReviewAskCacheEntry = {
   cacheKey: string;
   ask?: PersistedAsk;
+  updatedAt: number;
+};
+
+type ReviewSnapshotCacheEntry = {
+  scopeKey: string;
+  lines: ReviewSnapshotLine[];
   updatedAt: number;
 };
 
@@ -168,4 +180,63 @@ export function persistCachedAsk(
     ask,
     updatedAt: Date.now(),
   } satisfies ReviewAskCacheEntry);
+}
+
+export function getLastReviewSnapshot(
+  ctx: ExtensionCommandContext,
+  scopeKey: string,
+): ReviewSnapshotLine[] | undefined {
+  let latest: ReviewSnapshotCacheEntry | undefined;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    if (
+      entry.type !== "custom" ||
+      entry.customType !== REVIEW_SNAPSHOT_CACHE_ENTRY
+    ) {
+      continue;
+    }
+
+    const data = entry.data as Partial<ReviewSnapshotCacheEntry> | undefined;
+    if (data?.scopeKey !== scopeKey || !Array.isArray(data.lines)) continue;
+
+    const lines = data.lines.filter(isReviewSnapshotLine);
+    if (!latest || (data.updatedAt ?? 0) >= latest.updatedAt) {
+      latest = {
+        scopeKey: data.scopeKey,
+        lines,
+        updatedAt: data.updatedAt ?? 0,
+      };
+    }
+  }
+
+  return latest?.lines;
+}
+
+export function persistLastReviewSnapshot(
+  pi: ExtensionAPI,
+  scopeKey: string,
+  lines: ReviewLine[] | ReviewSnapshotLine[],
+): void {
+  pi.appendEntry(REVIEW_SNAPSHOT_CACHE_ENTRY, {
+    scopeKey,
+    lines: lines.map((line) => ({
+      kind: line.kind,
+      text: line.text,
+      filePath: line.filePath,
+      oldLineNumber: line.oldLineNumber,
+      newLineNumber: line.newLineNumber,
+    })),
+    updatedAt: Date.now(),
+  } satisfies ReviewSnapshotCacheEntry);
+}
+
+function isReviewSnapshotLine(value: unknown): value is ReviewSnapshotLine {
+  if (!value || typeof value !== "object") return false;
+  const line = value as Partial<ReviewSnapshotLine>;
+  return (
+    typeof line.kind === "string" &&
+    typeof line.text === "string" &&
+    (line.filePath == null || typeof line.filePath === "string") &&
+    (line.oldLineNumber == null || typeof line.oldLineNumber === "number") &&
+    (line.newLineNumber == null || typeof line.newLineNumber === "number")
+  );
 }

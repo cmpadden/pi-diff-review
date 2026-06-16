@@ -5,11 +5,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getDiff, parseDiffSource } from "./diff/source.ts";
 import { parseDiff } from "./diff/parser.ts";
+import { applyReviewedOverlay } from "./diff/turn-based-overlay.ts";
 import { PiModelDiffExplainer } from "./explanation/explainer.ts";
 import {
+  getLastReviewSnapshot,
   getCachedAsk,
   getCachedComments,
   getCachedExplanations,
+  persistLastReviewSnapshot,
   persistCachedAsk,
   persistCachedComments,
   persistCachedExplanations,
@@ -28,6 +31,10 @@ import { parseViewSource, resolveViewFiles } from "./view/source.ts";
 function getReviewCacheKey(cwd: string, label: string, text: string): string {
   const hash = createHash("sha256").update(text).digest("hex");
   return `${cwd}\0${label}\0${hash}`;
+}
+
+function getReviewScopeKey(cwd: string, args: string[]): string {
+  return `${cwd}\0diff\0${JSON.stringify(args)}`;
 }
 
 export function registerDiffReviewCommand(pi: ExtensionAPI): void {
@@ -51,11 +58,34 @@ export function registerDiffReviewCommand(pi: ExtensionAPI): void {
       }
 
       const reviewLines = parseDiff(diffText);
+      const turnBasedScopeKey = source.turnBased
+        ? getReviewScopeKey(ctx.cwd, source.args)
+        : undefined;
+      if (turnBasedScopeKey) {
+        const previousLines = getLastReviewSnapshot(ctx, turnBasedScopeKey);
+        if (previousLines) {
+          const marked = applyReviewedOverlay(reviewLines, previousLines);
+          ctx.ui.notify(
+            `Marked ${marked} reviewed line${marked === 1 ? "" : "s"}.`,
+            "info",
+          );
+        } else {
+          ctx.ui.notify(
+            "No reviewed baseline found. Press M to toggle the current hunk as reviewed.",
+            "info",
+          );
+        }
+      }
       await openReview(pi, ctx, {
         title: source.label,
         promptLabel: source.promptLabel,
         cacheKey: getReviewCacheKey(ctx.cwd, source.label, diffText),
         reviewLines,
+        markReviewed:
+          turnBasedScopeKey == null
+            ? undefined
+            : (reviewedLines) =>
+                persistLastReviewSnapshot(pi, turnBasedScopeKey, reviewedLines),
         buildPrompt: (comments) =>
           buildReviewPrompt(comments, source.promptLabel),
       });
@@ -113,6 +143,7 @@ async function openReview(
     cacheKey: string;
     reviewLines: ReviewLine[];
     buildPrompt: (comments: ReviewComment[]) => string;
+    markReviewed?: (reviewedLines: ReviewLine[]) => void;
     workspaceStore?: WorkspaceCommentStore;
   },
 ): Promise<void> {
@@ -202,6 +233,9 @@ async function openReview(
           persistCachedAsk(pi, options.cacheKey, updatedAsk);
         },
         () => summary(),
+        options.markReviewed
+          ? (reviewedLines) => options.markReviewed?.(reviewedLines)
+          : undefined,
       );
     },
   );
