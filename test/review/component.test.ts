@@ -87,6 +87,7 @@ function createComponent(
       result: { action: "submit"; comments: any[] } | { action: "cancel" },
     ) => void;
     theme?: ReviewTheme;
+    onMarkReviewed?: (reviewedLines: ReviewLine[]) => void;
   } = {},
 ): ReviewComponent {
   const tui: ReviewTui = {
@@ -114,6 +115,7 @@ function createComponent(
     options.cachedAsk,
     options.onAskChanged,
     undefined,
+    options.onMarkReviewed,
   );
 }
 
@@ -281,6 +283,103 @@ describe("ReviewComponent", () => {
 
     assert.match(output, /<fg:warning>needle/);
     assert.match(output, /<fg:accent>needle/);
+  });
+
+  it("renders reviewed lines with a muted blue background", () => {
+    const component = createComponent(
+      [
+        {
+          id: "turn-meta",
+          kind: "meta",
+          text: "diff --git a/src/example.ts b/src/example.ts",
+          filePath: "src/example.ts",
+          commentable: false,
+        },
+        {
+          id: "turn-line",
+          kind: "add",
+          text: "+const changed = true;",
+          filePath: "src/example.ts",
+          newLineNumber: 1,
+          commentable: true,
+          reviewedOverlay: true,
+        },
+      ],
+      {
+        theme: {
+          fg: (token, text) => `<fg:${token}>${text}</fg:${token}>`,
+          bg: (token, text) => `<bg:${token}>${text}</bg:${token}>`,
+        } as ReviewTheme,
+      },
+    );
+
+    (component as any).selected = 0;
+    const output = component.render(100).join("\n");
+
+    assert.match((component as any).getHeaderText(), /1 reviewed/);
+    assert.match(output, /\x1b\[48;2;38;68;92m/);
+    assert.doesNotMatch(output, /<bg:toolSuccessBg>/);
+  });
+
+  it("toggles the current hunk as reviewed with M", () => {
+    let persisted: ReviewLine[] = [];
+    const component = createComponent(
+      [
+        {
+          id: "hunk-1",
+          kind: "hunk",
+          text: "@@ -1 +1 @@",
+          filePath: "src/example.ts",
+          commentable: false,
+          hunkLabel: "@@ -1 +1 @@",
+        },
+        {
+          id: "changed-line-1",
+          kind: "add",
+          text: "+const changed = true;",
+          filePath: "src/example.ts",
+          newLineNumber: 1,
+          commentable: true,
+          hunkLabel: "@@ -1 +1 @@",
+        },
+        {
+          id: "hunk-2",
+          kind: "hunk",
+          text: "@@ -5 +5 @@",
+          filePath: "src/example.ts",
+          commentable: false,
+          hunkLabel: "@@ -5 +5 @@",
+        },
+        {
+          id: "changed-line-2",
+          kind: "add",
+          text: "+const other = true;",
+          filePath: "src/example.ts",
+          newLineNumber: 5,
+          commentable: true,
+          hunkLabel: "@@ -5 +5 @@",
+        },
+      ],
+      {
+        onMarkReviewed: (reviewedLines) => {
+          persisted = reviewedLines;
+        },
+      },
+    );
+
+    component.handleInput("M");
+
+    assert.equal((component as any).lines[1].reviewedOverlay, true);
+    assert.equal((component as any).lines[3].reviewedOverlay, undefined);
+    assert.deepEqual(
+      persisted.map((line) => line.id),
+      ["changed-line-1"],
+    );
+
+    component.handleInput("M");
+
+    assert.equal((component as any).lines[1].reviewedOverlay, false);
+    assert.deepEqual(persisted, []);
   });
 
   it("focuses the current file and hides other files", () => {

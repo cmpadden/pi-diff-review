@@ -12,21 +12,75 @@ export function parseDiffSource(args: string): DiffSource {
     };
   }
 
-  const gitArgs = tokenizeDiffArgs(trimmed);
+  const { gitArgs, turnBased } = parseDiffArgs(trimmed);
+  if (!turnBased) {
+    return {
+      label: `git diff ${trimmed}`,
+      promptLabel: `\`git diff ${trimmed}\``,
+      args: gitArgs,
+    };
+  }
+
+  const gitDiffLabel =
+    gitArgs.length > 0 ? `git diff ${gitArgs.join(" ")}` : "unstaged git diff";
+  const promptLabel =
+    gitArgs.length > 0
+      ? `\`git diff ${gitArgs.join(" ")}\``
+      : "the current unstaged git diff";
+
   return {
-    label: `git diff ${trimmed}`,
-    promptLabel: `\`git diff ${trimmed}\``,
+    label: `${gitDiffLabel} with turn-based review overlay`,
+    promptLabel,
     args: gitArgs,
+    turnBased: true,
   };
 }
 
-function tokenizeDiffArgs(input: string): string[] {
+function parseDiffArgs(input: string): {
+  gitArgs: string[];
+  turnBased: boolean;
+} {
   try {
-    return normalizeDiffPathspecs(tokenizeShellArgs(input));
+    const tokens = tokenizeShellArgs(input);
+    const { args, turnBased } = extractDiffReviewFlags(tokens);
+    return {
+      gitArgs: normalizeDiffPathspecs(args),
+      turnBased,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message.replace(/in arguments$/, "in git diff args"));
   }
+}
+
+function extractDiffReviewFlags(tokens: string[]): {
+  args: string[];
+  turnBased: boolean;
+} {
+  const args: string[] = [];
+  let turnBased = false;
+  let passthrough = false;
+
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]!;
+    if (token === "--") {
+      passthrough = true;
+      args.push(token);
+      continue;
+    }
+
+    if (!passthrough && token === "--turn-based") {
+      if (turnBased) {
+        throw new Error("--turn-based can only be provided once");
+      }
+      turnBased = true;
+      continue;
+    }
+
+    args.push(token);
+  }
+
+  return { args, turnBased };
 }
 
 function normalizeDiffPathspecs(args: string[]): string[] {

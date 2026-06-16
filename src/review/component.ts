@@ -31,6 +31,12 @@ import { ReviewSearchState } from "./search.ts";
 import { buildReviewFileIndex, type ReviewFileSection } from "./files.ts";
 import { padToWidth, lineNumberCell } from "../render/utils.ts";
 import { buildSplitDiffRows } from "../diff/split.ts";
+import {
+  areAllChangedLinesReviewed,
+  clearReviewedOverlay,
+  getReviewedLines,
+  markChangedLinesReviewed,
+} from "../diff/turn-based-overlay.ts";
 import type {
   DiffRenderMode,
   PersistedAsk,
@@ -71,6 +77,7 @@ const HELP_COMMANDS = [
   ["/", "search diff lines"],
   ["n / N", "jump between search matches"],
   ["J / K", "extend highlighted selection"],
+  ["M", "toggle current hunk reviewed"],
   ["c", "add or edit a line or range comment"],
   ["C", "add or edit an overall diff comment"],
   ["x", "delete the current line or range comment"],
@@ -136,6 +143,7 @@ export class ReviewComponent {
     private getWorkspaceCommentSummary?: (
       comments: Map<string, ReviewComment>,
     ) => WorkspaceCommentSummary | undefined,
+    private onMarkReviewed?: (reviewedLines: ReviewLine[]) => void,
   ) {
     const firstCommentable = this.lines.findIndex((line) => line.commentable);
     this.navigation = new ReviewNavigationState(
@@ -400,6 +408,10 @@ export class ReviewComponent {
       this.extendSelection(-1);
       return;
     }
+    if (data === "M") {
+      this.markCurrentDiffReviewed();
+      return;
+    }
     if (data === "n") {
       if (this.search.query) {
         this.jumpSearch(1);
@@ -488,7 +500,12 @@ export class ReviewComponent {
   ): string {
     const visibleLineCount = this.getVisibleLineIndexes().length;
     const summaryCount = this.explanationController.explanations.size;
-    const base = `${visibleLineCount}/${this.lines.length} lines • ${this.fileIndex.sections.length} files • ${this.comments.size} comments • ${summaryCount} summaries${this.formatWorkspaceSummary(workspaceSummary)}`;
+    const reviewedOverlayCount = this.lines.filter(
+      (line) => line.reviewedOverlay,
+    ).length;
+    const reviewedOverlayText =
+      reviewedOverlayCount > 0 ? ` • ${reviewedOverlayCount} reviewed` : "";
+    const base = `${visibleLineCount}/${this.lines.length} lines • ${this.fileIndex.sections.length} files • ${this.comments.size} comments • ${summaryCount} summaries${reviewedOverlayText}${this.formatWorkspaceSummary(workspaceSummary)}`;
 
     if (this.editMode) {
       return `${base} • editing ${this.editingCommentKey === GLOBAL_COMMENT_KEY ? "overall comment" : "inline comment"}`;
@@ -1290,13 +1307,12 @@ export class ReviewComponent {
     index: number,
     width: number,
   ): string[] {
-    const hasComment = this.getCommentKeysForLine(index).length > 0;
-    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
+    const lineMark = this.getLineMark(line, index);
     const numbers = `${lineNumberCell(line.oldLineNumber)} ${lineNumberCell(line.newLineNumber)}`;
-    const prefix = this.styleDiffPrefix(line, `${commentMark} ${numbers} `);
+    const prefix = this.styleDiffPrefix(line, `${lineMark} ${numbers} `);
     const continuationPrefix = this.styleDiffPrefix(
       line,
-      `${commentMark} ${lineNumberCell()} ${lineNumberCell()} `,
+      `${lineMark} ${lineNumberCell()} ${lineNumberCell()} `,
     );
     return this.wrapDiffContentSegments(
       this.getRenderedDiffContent(line, index),
@@ -1312,17 +1328,16 @@ export class ReviewComponent {
     side: "left" | "right",
   ): string[] {
     const { line, index } = cell;
-    const hasComment = this.getCommentKeysForLine(index).length > 0;
-    const commentMark = hasComment ? this.theme.fg("borderAccent", "│") : " ";
+    const lineMark = this.getLineMark(line, index);
     const lineNumber =
       side === "left" ? line.oldLineNumber : line.newLineNumber;
     const prefix = this.styleDiffPrefix(
       line,
-      `${commentMark} ${lineNumberCell(lineNumber)} `,
+      `${lineMark} ${lineNumberCell(lineNumber)} `,
     );
     const continuationPrefix = this.styleDiffPrefix(
       line,
-      `${commentMark} ${lineNumberCell()} `,
+      `${lineMark} ${lineNumberCell()} `,
     );
     return this.wrapDiffContentSegments(
       this.getRenderedDiffContent(line, index),
@@ -1358,6 +1373,46 @@ export class ReviewComponent {
       default:
         return this.theme.fg("muted", text);
     }
+  }
+
+  private getLineMark(line: ReviewLine, index: number): string {
+    const hasComment = this.getCommentKeysForLine(index).length > 0;
+    if (hasComment) return this.theme.fg("borderAccent", "│");
+    return " ";
+  }
+
+  private markCurrentDiffReviewed(): void {
+    if (!this.onMarkReviewed) return;
+    const range = this.getCurrentHunkRange();
+    if (!range) return;
+
+    const hunkLines = this.lines.slice(range.start, range.end + 1);
+    if (areAllChangedLinesReviewed(hunkLines)) {
+      clearReviewedOverlay(hunkLines);
+    } else {
+      markChangedLinesReviewed(hunkLines);
+    }
+
+    this.onMarkReviewed(getReviewedLines(this.lines));
+    this.invalidateAnnotatedRows();
+    this.tui.requestRender(true);
+  }
+
+  private getCurrentHunkRange(): SelectionBounds | undefined {
+    const selectedLine = this.lines[this.selected];
+    if (!selectedLine?.filePath || !selectedLine.hunkLabel) return undefined;
+
+    let start = this.selected;
+    while (
+      start > 0 &&
+      this.lines[start - 1]?.filePath === selectedLine.filePath &&
+      this.lines[start - 1]?.hunkLabel === selectedLine.hunkLabel
+    ) {
+      start--;
+    }
+
+    const end = this.getHunkEndIndex(this.selected);
+    return end == null ? undefined : { start, end };
   }
 
   private wrapDiffContentSegments(
@@ -1793,6 +1848,9 @@ export class ReviewComponent {
     const selection = this.getSelectionBounds();
     const inSelection =
       selection != null && index >= selection.start && index <= selection.end;
+    if (line.reviewedOverlay) {
+      return this.applyReviewedBackground(styled, width);
+    }
     if (index === this.selected || inSelection) {
       return this.theme.bg("selectedBg", padToWidth(styled, width));
     }
@@ -1831,13 +1889,22 @@ export class ReviewComponent {
     styled: string,
     width: number,
   ): string {
+    if (line.reviewedOverlay) {
+      return this.applyReviewedBackground(styled, width);
+    }
+
+    const padded = padToWidth(styled, width);
     if (line.kind === "add") {
-      return this.theme.bg("toolSuccessBg", padToWidth(styled, width));
+      return this.theme.bg("toolSuccessBg", padded);
     }
     if (line.kind === "remove") {
-      return this.theme.bg("toolErrorBg", padToWidth(styled, width));
+      return this.theme.bg("toolErrorBg", padded);
     }
     return styled;
+  }
+
+  private applyReviewedBackground(styled: string, width: number): string {
+    return `\x1b[48;2;38;68;92m${padToWidth(styled, width)}\x1b[49m`;
   }
 
   private renderDiffRowContent(
@@ -1924,6 +1991,9 @@ export class ReviewComponent {
       " ".repeat(width);
     const inSelection =
       selection != null && index >= selection.start && index <= selection.end;
+    if (line.reviewedOverlay) {
+      return this.applyReviewedBackground(styled, width);
+    }
     if (selected || inSelection) {
       return this.theme.bg("selectedBg", padToWidth(styled, width));
     }

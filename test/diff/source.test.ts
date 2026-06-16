@@ -41,6 +41,15 @@ describe("parseDiffSource", () => {
     );
   });
 
+  it("extracts turn-based mode without passing it to git diff", () => {
+    assert.deepEqual(parseDiffSource("--cached --turn-based -- @src/a.ts"), {
+      label: "git diff --cached -- src/a.ts with turn-based review overlay",
+      promptLabel: "`git diff --cached -- src/a.ts`",
+      args: ["--cached", "--", "src/a.ts"],
+      turnBased: true,
+    });
+  });
+
   it("preserves git revision syntax outside --", () => {
     assert.deepEqual(parseDiffSource("@~1").args, ["@~1"]);
     assert.deepEqual(parseDiffSource("@{upstream}").args, ["@{upstream}"]);

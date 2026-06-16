@@ -25,6 +25,7 @@ export type ReviewLine = {
   newLineNumber?: number;
   commentable: boolean;
   hunkLabel?: string;
+  reviewedOverlay?: boolean;
 };
 
 export type ReviewResult =
@@ -40,7 +41,13 @@ export type DiffSource = {
   label: string;
   promptLabel: string;
   args: string[];
+  turnBased?: boolean;
 };
+
+export type ReviewSnapshotLine = Pick<
+  ReviewLine,
+  "kind" | "text" | "filePath" | "oldLineNumber" | "newLineNumber"
+>;
 
 export type PersistedAsk = {
   scopeKey: string;
