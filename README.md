@@ -98,7 +98,7 @@ Open one or more files or folders with `/view`:
 - `j/k` or arrow keys to move
 - `g/G` to jump to the top or bottom of the diff
 - `[/]` to jump to the previous or next file
-- `f` to focus the current file, or clear file focus
+- `f` to focus the current file, or clear file focus; use `[/]` to switch files while focused
 - `t` toggles the left file sidebar
 - `ctrl-u` / `ctrl-d` to move up/down by half a page
 - `s` toggles inline comments/explanations

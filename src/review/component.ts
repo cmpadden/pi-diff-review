@@ -72,7 +72,7 @@ const HELP_COMMANDS = [
   ["ctrl-u / ctrl-d", "move up or down half a page"],
   ["g / G", "jump to top or bottom"],
   ["[ / ]", "jump to previous or next file"],
-  ["f", "focus or unfocus the current file"],
+  ["f", "focus or unfocus the current file ([ / ] switches focus)"],
   ["n / p", "jump to next or previous hunk"],
   ["/", "search diff lines"],
   ["n / N", "jump between search matches"],
@@ -1524,7 +1524,7 @@ export class ReviewComponent {
   }
 
   private jumpFile(direction: 1 | -1): void {
-    const files = this.getVisibleFileSections();
+    const files = this.fileIndex.sections;
     if (files.length === 0) return;
     const current = this.getCurrentFileSection();
     const currentIndex = current
@@ -1538,6 +1538,11 @@ export class ReviewComponent {
           : files.length - 1;
     const next = files[nextIndex];
     if (!next) return;
+    if (this.focusedFilePath && this.focusedFilePath !== next.filePath) {
+      this.focusedFilePath = next.filePath;
+      this.highlightedLineCache.clear();
+      this.invalidateAnnotatedRows();
+    }
     this.navigation.jumpToIndex(next.firstCommentableLineIndex);
     this.tui.requestRender(true);
   }

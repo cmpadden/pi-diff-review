@@ -452,6 +452,27 @@ describe("ReviewComponent", () => {
     assert.equal((component as any).selected, 2);
   });
 
+  it("switches the focused file with bracket keys", () => {
+    const component = createComponent(buildMultiFileLines());
+
+    (component as any).selected = 2;
+    component.handleInput("f");
+    component.handleInput("t");
+    component.handleInput("]");
+
+    assert.equal((component as any).selected, 5);
+    let output = component.render(100).join("\n");
+    assert.doesNotMatch(output, /src\/a\.ts/);
+    assert.match(output, /src\/b\.ts/);
+    assert.match(output, /\[focused\]/);
+
+    component.handleInput("[");
+    assert.equal((component as any).selected, 2);
+    output = component.render(100).join("\n");
+    assert.match(output, /src\/a\.ts/);
+    assert.doesNotMatch(output, /src\/b\.ts/);
+  });
+
   it("renders a toggleable file sidebar with the current file highlighted", () => {
     const component = createComponent(buildMultiFileLines(), {
       theme: {
