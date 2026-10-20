@@ -84,16 +84,6 @@ export class PiModelDiffExplainer implements DiffExplainer {
       throw new Error("No model is selected.");
     }
 
-    const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) {
-      throw new Error(auth.error);
-    }
-
-    const provider = this.ctx.modelRegistry.getProvider(model.provider);
-    if (!provider) {
-      throw new Error(`No provider is registered for ${model.provider}.`);
-    }
-
     const context: Context = {
       systemPrompt:
         "You explain code clearly and concisely for review. Focus on intent, behavior, and risk. Avoid restating every line.",
@@ -109,9 +99,7 @@ export class PiModelDiffExplainer implements DiffExplainer {
     };
 
     let streamedText = "";
-    const stream = provider.streamSimple(model, context, {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
+    const stream = this.ctx.modelRegistry.streamSimple(model, context, {
       signal: options.signal,
       maxTokens: 800,
       reasoning: "minimal",
