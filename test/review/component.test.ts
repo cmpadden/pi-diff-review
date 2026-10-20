@@ -452,6 +452,23 @@ describe("ReviewComponent", () => {
     assert.equal((component as any).selected, 2);
   });
 
+  it("jumps between files while keeping file focus", () => {
+    const component = createComponent(buildMultiFileLines());
+
+    (component as any).selected = 2;
+    component.handleInput("f");
+    component.handleInput("]");
+
+    assert.equal((component as any).selected, 5);
+    assert.equal((component as any).focusedFilePath, "src/b.ts");
+
+    component.handleInput("t");
+    const output = component.render(100).join("\n");
+    assert.match(output, /src\/b\.ts/);
+    assert.doesNotMatch(output, /src\/a\.ts/);
+    assert.match(output, /\[focused\]/);
+  });
+
   it("renders a toggleable file sidebar with the current file highlighted", () => {
     const component = createComponent(buildMultiFileLines(), {
       theme: {
