@@ -1524,7 +1524,9 @@ export class ReviewComponent {
   }
 
   private jumpFile(direction: 1 | -1): void {
-    const files = this.getVisibleFileSections();
+    const files = this.focusedFilePath
+      ? this.fileIndex.sections
+      : this.getVisibleFileSections();
     if (files.length === 0) return;
     const current = this.getCurrentFileSection();
     const currentIndex = current
@@ -1539,6 +1541,11 @@ export class ReviewComponent {
     const next = files[nextIndex];
     if (!next) return;
     this.navigation.jumpToIndex(next.firstCommentableLineIndex);
+    if (this.focusedFilePath) {
+      this.focusedFilePath = next.filePath;
+      this.highlightedLineCache.clear();
+      this.invalidateAnnotatedRows();
+    }
     this.tui.requestRender(true);
   }
 
