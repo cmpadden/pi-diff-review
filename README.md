@@ -10,6 +10,8 @@
 
 ## Install
 
+Requires pi 1.5.2 or newer within the 1.x release line.
+
 Install from npm:
 
 ```bash
